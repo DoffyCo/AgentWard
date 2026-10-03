@@ -1,0 +1,30 @@
+{
+    "agent_role": "healthcare_claims_agent",
+    "description": "Initial policies for an autonomous healthcare insurance claims agent.",
+    "allowed_servers": [
+        "filesystem",
+        "git",
+        "memory",
+        "fetch"
+    ],
+    "policies": [
+        {
+            "id": "AW-001",
+            "name": "approved_resource_boundary",
+            "description": "The agent should not access resources outside its approved working area.",
+            "check": "path_boundary"
+        },
+        {
+            "id": "AW-002",
+            "name": "approved_data_destinations",
+            "description": "The agent should not access or transfer data to unapproved external destinations.",
+            "check": "destination"
+        },
+        {
+            "id": "AW-003",
+            "name": "sensitive_resource_access",
+            "description": "Access to sensitive resources should be reviewed against the agent's authorized purpose.",
+            "check": "sensitive_resource"
+        }
+    ]
+}
