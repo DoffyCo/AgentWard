@@ -6,7 +6,7 @@ AgentWard is a proof-of-concept security gateway for autonomous healthcare AI ag
 
 
 
-The long-term goal of AgentWard is to provide an additional security layer around autonomous agents by examining agent requests, tool calls, resource access, and data destinations. AgentWard is intended to complement existing authorization mechanisms such as role-based access control (RBAC) by evaluating whether an agent's actions are appropriate for its defined role and purpose.
+AgentWard provides an external analysis layer around autonomous agents by examining recorded requests, tool calls, resource access, and data destinations. It is intended to complement authorization mechanisms such as role-based access control (RBAC) by evaluating whether recorded actions align with defined security policies.
 
 
 
@@ -27,8 +27,6 @@ AI tools were used during the development of AgentWard to assist with refining c
 AgentWard v1 is a decision-support prototype. It does not directly control an autonomous agent or block tool calls in real time. Instead, it analyzes recorded ADOP activity and produces a security assessment based on a set of defined policies.
 
 
-
-Future versions may expand this functionality to support enforcement decisions, more detailed RBAC integration, and additional healthcare specific controls.
 
 
 
@@ -249,7 +247,7 @@ secret-outside-sandbox.txt
 
 
 
-In a future healthcare implementation, this concept can be extended to identify and protect resources containing protected health information (PHI).
+The current prototype uses resource names and paths as indicators; it does not identify or verify protected health information (PHI).
 
 
 
@@ -481,131 +479,4 @@ AgentWard's intended role is to examine these actions against policies defining:
 
 
 
-In the current v1 PoC, these concepts are represented through simplified policy checks applied to ADOP activity records. The v1 PoC does not currently identify real PHI from healthcare records. The healthcare policies provide the foundation for extending the system toward PHI-aware analysis in the future versions.
-
-
-
-### **Planned Development:**
-
-
-
-###### **v1 - Record Analysis:**
-
-
-
-The first version establishes the basic AgentWard pipeline:
-
-
-
-&#x20;ADOP Records
-
-
-
-&#x20;     |
-
-&#x20;     |
-
-&#x20;     |
-
-&#x20;     v
-
-
-
-&#x20;Record Reader
-
-
-
-&#x20;     |
-
-&#x20;     |
-
-&#x20;     |
-
-&#x20;     v
-
-
-
-Policy Evaluation
-
-
-
-&#x20;     |
-
-&#x20;     |
-
-&#x20;     |
-
-&#x20;     v
-
-
-
-Security Findings
-
-
-
-&#x20;     |
-
-&#x20;     |
-
-&#x20;     |
-
-&#x20;     v
-
-
-
-&#x20;   Report
-
-
-
-The goal is to demonstrate that ADOP activity can be used by an external AgentWard component and evaluated against defined security policies.
-
-
-
-###### **v2 - Policy Based Decisions:**
-
-
-
-A future version can extend the evaluator to produce explicit decisions such as:
-
-
-
-ALLOW
-
-DENY
-
-REVIEW
-
-
-
-along with an explanation of why the decision was made.
-
-
-
-###### **v3 - RBAC and Agent Context:**
-
-
-
-A later version can introduce agent roles and permissions so that policies are evaluated according to the identity and purpose of the autonomous agent.
-
-
-
-For example:
-
-
-
-Claims Agent
-
-&#x20;   |
-
-&#x20;   +-- Patient Claims Data       ALLOWED
-
-&#x20;   +-- Claims Database           ALLOWED
-
-&#x20;   +-- Unrelated Patient Data    DENIED
-
-&#x20;   +-- External Destination      REVIEW
-
-
-
-This would move AgentWard closer to the security gateway architecture described in the project proposal.
-
+In the current v1 PoC, these concepts are represented through simplified policy checks applied to ADOP activity records. The v1 PoC does not currently identify real PHI from healthcare records. The healthcare policies are represented by simplified checks against ADOP activity records.
