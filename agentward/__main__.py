@@ -43,7 +43,7 @@ def analyze(input_file: str, output_file: str | None = None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="AgentWard v1 - Analyze ADOP security records"
+        description="AgentWard v2 - Analyze ADOP security records"
     )
 
     subparsers = parser.add_subparsers(dest="command")
