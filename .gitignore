@@ -1,0 +1,17 @@
+# Python generated files
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+
+# Generated assessment reports
+reports/*.txt
+
+# Video recordings
+*.mp4
+
+# Local environment configuration
+.env
