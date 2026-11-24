@@ -11,8 +11,8 @@ from agentward.evaluator import (
     classify_risk,
 )
 
-st.set_page_config(page_title="AgentWard v2", layout="wide")
-st.title("AgentWard v2")
+st.set_page_config(page_title="AgentWard v3", layout="wide")
+st.title("AgentWard v3")
 st.caption("Decision-support dashboard · Observe-only analysis")
 
 st.info(
@@ -45,7 +45,20 @@ finally:
         temp_path.unlink(missing_ok=True)
 
 session_id = records[0].get("session_id", "unknown") if records else "unknown"
-scenario = records[0].get("scenario_tag", "unknown") if records else "unknown"
+
+# Identify the scenario from the ADOP records.
+scenarios = {
+    record.get("scenario_tag")
+    for record in records
+    if record.get("scenario_tag") in ("clean", "poisoned")
+}
+
+if len(scenarios) == 1:
+    scenario = next(iter(scenarios))
+elif len(scenarios) > 1:
+    scenario = "mixed"
+else:
+    scenario = "unknown"
 
 st.subheader("Assessment")
 metric1, metric2, metric3, metric4 = st.columns(4)
@@ -61,8 +74,18 @@ if st.button("Save report to the reports folder"):
     reports_dir = Path(__file__).resolve().parent / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
+    # Include the scenario, date, and time in the report filename.
     timestamp = datetime.now().strftime("%m-%d-%Y_%H-%M-%S")
-    output_path = reports_dir / f"agentward-report-{timestamp}.txt"
+    input_name = Path(uploaded_file.name).stem
+    base_name = f"{input_name}-{scenario}-assessment-{timestamp}"
+
+    output_path = reports_dir / f"{base_name}.txt"
+    counter = 1
+
+    # Prevent existing reports from being overwritten.
+    while output_path.exists():
+        output_path = reports_dir / f"{base_name}-{counter}.txt"
+        counter += 1
 
     report_text = generate_report(records, findings)
     save_report(report_text, str(output_path))

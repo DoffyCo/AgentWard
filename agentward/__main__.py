@@ -1,9 +1,11 @@
 import argparse
+from datetime import datetime
 from pathlib import Path
 
 from agentward.reader import read_adop_records
 from agentward.evaluator import evaluate_records
 from agentward.report import generate_report, save_report
+
 
 # Analyze an ADOP JSONL file with AgentWard policies.
 def analyze(input_file: str, output_file: str | None = None) -> None:
@@ -21,16 +23,32 @@ def analyze(input_file: str, output_file: str | None = None) -> None:
         reports_dir = Path("reports")
         reports_dir.mkdir(parents=True, exist_ok=True)
 
-        base_name = f"{input_path.stem}-assessment"
+        # Identify the scenario from the ADOP records.
+        scenarios = {
+            record.get("scenario_tag")
+            for record in records
+            if record.get("scenario_tag") in ("clean", "poisoned")
+        }
+
+        if len(scenarios) == 1:
+            scenario = next(iter(scenarios))
+        elif len(scenarios) > 1:
+            scenario = "mixed"
+        else:
+            scenario = "unknown"
+
+        # Include the scenario, date, and time in the report filename.
+        timestamp = datetime.now().strftime("%m-%d-%Y_%H-%M-%S")
+        base_name = f"{input_path.stem}-{scenario}-assessment-{timestamp}"
+
+        output_path = reports_dir / f"{base_name}.txt"
         counter = 1
 
-        while True:
+        # Prevent existing reports from being overwritten.
+        while output_path.exists():
             output_path = reports_dir / f"{base_name}-{counter}.txt"
-
-            if not output_path.exists():
-                break
-
             counter += 1
+
     else:
         output_path = Path(output_file)
 
@@ -41,9 +59,10 @@ def analyze(input_file: str, output_file: str | None = None) -> None:
     print()
     print(f"Report saved to: {output_path}")
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="AgentWard v2 - Analyze ADOP security records"
+        description="AgentWard v3 - Analyze ADOP security records"
     )
 
     subparsers = parser.add_subparsers(dest="command")

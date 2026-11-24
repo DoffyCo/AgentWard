@@ -4,13 +4,27 @@ from agentward.evaluator import calculate_risk_score, classify_risk
 
 def generate_report(records: list[dict[str, Any]], findings: list[dict[str, Any]]) -> str:
     session_id = records[0].get("session_id", "unknown") if records else "unknown"
-    scenario = records[0].get("scenario_tag", "unknown") if records else "unknown"
+
+    # Identify the scenario from the ADOP records.
+    scenarios = {
+        record.get("scenario_tag")
+        for record in records
+        if record.get("scenario_tag") in ("clean", "poisoned")
+    }
+
+    if len(scenarios) == 1:
+        scenario = next(iter(scenarios))
+    elif len(scenarios) > 1:
+        scenario = "mixed"
+    else:
+        scenario = "unknown"
+
     score = calculate_risk_score(findings)
     risk_band = classify_risk(findings)
 
     lines = [
         "=" * 60,
-        "AgentWard v2 Decision-Support Assessment",
+        "AgentWard v3 Decision-Support Assessment",
         "=" * 60,
         "",
         f"ADOP Session: {session_id}",
