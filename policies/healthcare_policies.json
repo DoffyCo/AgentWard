@@ -53,10 +53,24 @@
             "name": "dependency_integrity",
             "description": "Dependency manifest modifications and related staging and commit operations should be reviewed against approved dependency requirements.",
             "check": "dependency_validation"
+        },
+        {
+            "id": "AW-007",
+            "name": "excessive_tool_usage",
+            "description": "Excessive tool usage and repeated operations should be reviewed for potential resource exhaustion and denial-of-service conditions.",
+            "check": "tool_usage_patterns"
         }
     ],
     "approved_dependencies": {
         "fast-json-patch": "^3.1.1",
         "fast-uuid": "^0.4.0"
+    },
+    "tool_usage_thresholds": {
+        "task_calls_medium": 15,
+        "task_calls_high": 30,
+        "repeated_calls_medium": 5,
+        "repeated_calls_high": 10,
+        "failed_retries_medium": 3,
+        "failed_retries_high": 6
     }
 }

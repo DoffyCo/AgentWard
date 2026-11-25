@@ -55,6 +55,15 @@ def _load_policy_config() -> dict[str, Any]:
     ):
         raise ValueError("Invalid approved dependency configuration.")
 
+    thresholds = config.get("tool_usage_thresholds")
+    if not isinstance(thresholds, dict):
+        raise ValueError("Missing tool usage thresholds.")
+    for prefix in ("task_calls", "repeated_calls", "failed_retries"):
+        medium = thresholds.get(prefix + "_medium")
+        high = thresholds.get(prefix + "_high")
+        if type(medium) is not int or type(high) is not int or not 1 <= medium < high:
+            raise ValueError(f"Invalid tool usage thresholds: {prefix}")
+
     return config
 
 
@@ -765,6 +774,68 @@ def _check_aw006(record: dict[str, Any], records: list[dict[str, Any]]) -> list[
                           " ".join(issues) + evidence + outcome)]
 
 
+def _operation_signature(record: dict[str, Any]) -> tuple[str, str, str] | None:
+    # Compare actual arguments, independent of JSON object key order.
+    server = record.get("server")
+    tool = record.get("tool_name")
+    arguments = record.get("arguments")
+    if not isinstance(server, str) or not server.strip():
+        return None
+    if not isinstance(tool, str) or not tool.strip() or not isinstance(arguments, dict):
+        return None
+    try:
+        return server, tool, json.dumps(arguments, sort_keys=True, allow_nan=False)
+    except (TypeError, ValueError):
+        return None
+
+
+def _check_aw007(record: dict[str, Any], records: list[dict[str, Any]]) -> list[dict[str, str]]:
+    # Count activity up to this event, within the same session and task.
+    session, task, seq = (record.get(k) for k in ("session_id", "task_id", "seq"))
+    if not isinstance(session, str) or not session.strip() or not isinstance(task, str) or not task.strip() or type(seq) is not int:
+        return []
+    prior = sorted((r for r in records if r.get("session_id") == session
+                    and r.get("task_id") == task and type(r.get("seq")) is int
+                    and r["seq"] < seq), key=lambda r: r["seq"])
+    # Ambiguous sequence numbers cannot establish reliable ordering.
+    if len({r["seq"] for r in prior}) != len(prior) or sum(
+        r.get("session_id") == session and r.get("task_id") == task and r.get("seq") == seq
+        for r in records
+    ) > 1:
+        return []
+    signature = _operation_signature(record)
+    if signature is None:
+        return []
+    total = 1 + sum(_operation_signature(r) is not None for r in prior)
+    repeated = 1 + sum(_operation_signature(r) == signature for r in prior)
+    failures = 0
+    if record.get("result_status") == "error":
+        failures = 1
+        for event in reversed(prior):
+            if event.get("result_status") != "error" or _operation_signature(event) != signature:
+                break
+            failures += 1
+    thresholds = POLICY_CONFIG["tool_usage_thresholds"]
+    reasons = []
+    severities = []
+    for prefix, count, label in (
+        ("task_calls", total, "Recorded tool calls within this task"),
+        ("repeated_calls", repeated, "Identical tool calls within this task"),
+        ("failed_retries", failures, "Consecutive identical calls returning errors"),
+    ):
+        for severity in ("medium", "high"):
+            threshold = thresholds[f"{prefix}_{severity}"]
+            if count == threshold:
+                reasons.append(f"{label}: {count}; reached the {severity} threshold of {threshold}.")
+                severities.append(severity)
+    if not reasons:
+        return []
+    return [_policy_match(
+        "AW-007", "excessive_tool_usage", max(severities, key=SEVERITY_RANK.get),
+        " ".join(reasons) + " Potential excessive activity; recorded counts do not establish resource exhaustion or service disruption.",
+    )]
+
+
 def evaluate_record(
     record: dict[str, Any], session_records: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
@@ -792,6 +863,9 @@ def evaluate_record(
 
     # AW-006: Dependency Integrity.
     matches.extend(_check_aw006(record, session_records or []))
+
+    # AW-007: Excessive Tool Usage.
+    matches.extend(_check_aw007(record, session_records or []))
 
     # No policy matched this record.
     if not matches:
