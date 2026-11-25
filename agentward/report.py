@@ -1,5 +1,22 @@
+from datetime import datetime
 from typing import Any
 from agentward.evaluator import calculate_risk_score, classify_risk
+
+
+def format_timestamp(timestamp: Any) -> str:
+    # Format recorded UTC timestamps for display without changing the original data.
+    if not isinstance(timestamp, str) or not timestamp:
+        return "unknown"
+
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return timestamp
+
+    if parsed.utcoffset() is None or parsed.utcoffset().total_seconds() != 0:
+        return timestamp
+
+    return parsed.strftime("%Y-%m-%d T %H:%M:%S")
 
 
 def generate_report(records: list[dict[str, Any]], findings: list[dict[str, Any]]) -> str:
@@ -55,17 +72,30 @@ def generate_report(records: list[dict[str, Any]], findings: list[dict[str, Any]
                 f"Server: {finding.get('server', 'unknown')} | Tool: {finding.get('tool', 'unknown')}",
                 f"Target: {finding.get('target', 'unknown')}",
                 f"Occurrences: {finding.get('occurrence_count', 1)}",
+                f"Events with potential source relationships: {finding.get('correlated_event_count', 0)}",
                 "",
             ])
 
             for event in finding.get("events", [finding]):
                 lines.extend([
-                    f"  Sequence: {event.get('seq')} | Timestamp: {event.get('timestamp')}",
+                    f"  Sequence: {event.get('seq')} | Timestamp: {format_timestamp(event.get('timestamp'))}",
                     f"  Execution status: {event.get('result_status') or 'unknown'}",
                     f"  Severity: {event['severity']} | Policies: {event['policy_id']}",
                     f"  Reason: {event['reason']}",
-                    "",
                 ])
+                # Show source relationships for each individual event.
+                sources = event.get("prior_sources", [])
+                if sources:
+                    lines.append("  Potential source relationship (same session and task):")
+                    for source in sources:
+                        lines.append(
+                            f"    Earlier successful fetch: sequence {source['seq']} | "
+                            f"Timestamp: {format_timestamp(source['timestamp'])} | URL: {source['url']}"
+                        )
+                    lines.append("  Temporal ordering alone does not establish causation.")
+                else:
+                    lines.append("  No qualifying prior source relationship identified.")
+                lines.append("")
 
     lines.extend([
         "Limitations",
@@ -73,6 +103,7 @@ def generate_report(records: list[dict[str, Any]], findings: list[dict[str, Any]
         "- Risk points and bands are project-defined heuristics for triage, not calibrated risk measurements.",
         "- Each session/task/server/tool/recorded-target group contributes once at its highest severity. Incomplete identifiers remain separate.",
         "- Provenance flag checks event traceability, not data origin or whether PHI was disclosed.",
+        "- Source correlation uses earlier successful unapproved fetches in the same session and task. It does not prove prompt injection or causation and does not change risk points.",
     ])
     return "\n".join(lines)
 

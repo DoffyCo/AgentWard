@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
 from datetime import datetime
-from agentward.report import generate_report, save_report
+from agentward.report import generate_report, save_report, format_timestamp
 import streamlit as st
 
 from agentward.reader import read_adop_records
@@ -121,10 +121,23 @@ else:
                          f"{finding.get('tool') or 'unknown'}")
                 st.text(f"Occurrences: {finding.get('occurrence_count', 1)}")
                 for event in finding.get("events", [finding]):
-                    st.text(f"Sequence: {event.get('seq')} | Timestamp: {event.get('timestamp')}")
+                    st.text(f"Sequence: {event.get('seq')} | Timestamp: {format_timestamp(event.get('timestamp'))}")
                     st.text(f"Execution status: {event.get('result_status') or 'unknown'}")
                     st.text(f"Severity: {event['severity']} | Policies: {event['policy_id']}")
                     st.text(event["reason"])
+
+                    # Display potential source relationships for this event.
+                    sources = event.get("prior_sources", [])
+                    if sources:
+                        st.write("**Potential source relationship**")
+                        for source in sources:
+                            st.text(
+                                f"Earlier successful fetch: sequence {source['seq']} | "
+                                f"Timestamp: {format_timestamp(source['timestamp'])} | URL: {source['url']}"
+                            )
+                        st.caption("Same session and task; temporal ordering alone does not establish causation.")
+                    else:
+                        st.caption("No qualifying prior source relationship identified.")
 
             with right:
                 provenance = finding.get("provenance_flag", "INCOMPLETE")
@@ -133,6 +146,7 @@ else:
                     "TRACEABLE means the alert links to the listed ADOP event fields. "
                     "It does not prove maliciousness or confirm that PHI was disclosed."
                 )
+                st.text(f"Events with potential source relationships: {finding.get('correlated_event_count', 0)}")
                 st.write(f"**Alert points:** +{finding.get('risk_points', 0)}")
 
             decision_key = f"decision_{finding.get('rank')}"
@@ -153,5 +167,5 @@ else:
 st.divider()
 st.caption(
     "Interpretation: triage aid only—not a probability, CVSS score, or proof of compromise. "
-    "Provenance indicates event traceability, not data origin."
+    "Source relationships are potential correlations, not proof of causation."
 )
