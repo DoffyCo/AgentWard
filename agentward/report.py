@@ -1,9 +1,11 @@
+import json
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-import json
 from typing import Any
+
 from agentward.evaluator import calculate_risk_score, classify_risk
+from agentward.reader import identify_scenario
 
 
 def format_timestamp(timestamp: Any) -> str:
@@ -25,19 +27,7 @@ def format_timestamp(timestamp: Any) -> str:
 def generate_report(records: list[dict[str, Any]], findings: list[dict[str, Any]]) -> str:
     session_id = records[0].get("session_id", "unknown") if records else "unknown"
 
-    # Identify the scenario from the ADOP records.
-    scenarios = {
-        record.get("scenario_tag")
-        for record in records
-        if record.get("scenario_tag") in ("clean", "poisoned")
-    }
-
-    if len(scenarios) == 1:
-        scenario = next(iter(scenarios))
-    elif len(scenarios) > 1:
-        scenario = "mixed"
-    else:
-        scenario = "unknown"
+    scenario = identify_scenario(records)
 
     score = calculate_risk_score(findings)
     risk_band = classify_risk(findings)
@@ -119,7 +109,14 @@ def save_report(report: str, output_path: str) -> None:
 DISPOSITIONS = ("Needs review", "Escalate", "Dismiss")
 
 
-def generate_audit_report(records, findings, input_bytes, input_name, reviewer, decisions):
+def generate_audit_report(
+    records: list[dict[str, Any]],
+    findings: list[dict[str, Any]],
+    input_bytes: bytes,
+    input_name: str,
+    reviewer: str,
+    decisions: dict[int, dict[str, str]],
+) -> str:
     # Require a reviewer and a disposition for every grouped alert.
     if not reviewer.strip():
         raise ValueError("Enter a reviewer name or identifier.")
@@ -128,7 +125,9 @@ def generate_audit_report(records, findings, input_bytes, input_name, reviewer, 
 
     lines = [
         generate_report(records, findings),
-        "", "Stakeholder review", "-" * 60,
+        "",
+        "Stakeholder review",
+        "-" * 60,
         f"Reviewer: {json.dumps(reviewer.strip(), ensure_ascii=False)}",
         f"Review timestamp (UTC): {datetime.now(timezone.utc).strftime('%Y-%m-%d T %H:%M:%S')}",
         f"Input file: {json.dumps(input_name, ensure_ascii=False)}",
@@ -141,7 +140,8 @@ def generate_audit_report(records, findings, input_bytes, input_name, reviewer, 
         if decision["disposition"] not in DISPOSITIONS:
             raise ValueError("Invalid stakeholder disposition.")
         lines.extend([
-            "", f"Alert #{rank}",
+            "",
+            f"Alert #{rank}",
             f"Disposition: {decision['disposition']}",
             f"Rationale: {json.dumps(decision['rationale'], ensure_ascii=False)}",
         ])

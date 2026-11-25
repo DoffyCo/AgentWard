@@ -1,12 +1,17 @@
-
 import tempfile
-from pathlib import Path
 from datetime import datetime
 from hashlib import sha256
-from agentward.report import generate_audit_report, save_audit_report, format_timestamp, DISPOSITIONS
+from pathlib import Path
+
 import streamlit as st
 
-from agentward.reader import read_adop_records
+from agentward.reader import identify_scenario, read_adop_records
+from agentward.report import (
+    DISPOSITIONS,
+    format_timestamp,
+    generate_audit_report,
+    save_audit_report,
+)
 from agentward.evaluator import (
     evaluate_records,
     calculate_risk_score,
@@ -35,7 +40,10 @@ input_bytes = uploaded_file.getvalue()
 input_identity = (uploaded_file.name, sha256(input_bytes).hexdigest())
 if st.session_state.get("audit_input") != input_identity:
     for key in list(st.session_state.keys()):
-        if key.startswith(("decision_", "rationale_")) or key in ("reviewer", "saved_audit"):
+        if (
+            key.startswith(("decision_", "rationale_"))
+            or key in ("reviewer", "saved_audit")
+        ):
             del st.session_state[key]
     st.session_state["audit_input"] = input_identity
 
@@ -60,30 +68,23 @@ finally:
 
 session_id = records[0].get("session_id", "unknown") if records else "unknown"
 
-# Identify the scenario from the ADOP records.
-scenarios = {
-    record.get("scenario_tag")
-    for record in records
-    if record.get("scenario_tag") in ("clean", "poisoned")
-}
-
-if len(scenarios) == 1:
-    scenario = next(iter(scenarios))
-elif len(scenarios) > 1:
-    scenario = "mixed"
-else:
-    scenario = "unknown"
+scenario = identify_scenario(records)
 
 st.subheader("Assessment")
-metric1, metric2, metric3, metric4 = st.columns(4)
-metric1.metric("Risk band", risk_band)
-metric2.metric("Heuristic risk score", f"{score} points")
-metric3.metric("Grouped alerts", len(findings))
+(
+    risk_band_column,
+    risk_score_column,
+    alerts_column,
+    records_column,
+) = st.columns(4)
+risk_band_column.metric("Risk band", risk_band)
+risk_score_column.metric("Heuristic risk score", f"{score} points")
+alerts_column.metric("Grouped alerts", len(findings))
 st.caption(
     f"Flagged events: {sum(f.get('occurrence_count', 1) for f in findings)}. "
     "Score is an uncapped cumulative total; risk band follows highest severity."
 )
-metric4.metric("Records analyzed", len(records))
+records_column.metric("Records analyzed", len(records))
 
 st.text(f"ADOP session: {session_id} · Scenario: {scenario}")
 decisions = {}
@@ -179,7 +180,12 @@ st.caption("Input SHA-256: " + input_identity[1])
 if st.button("Save report to the reports folder"):
     try:
         report_text = generate_audit_report(
-            records, findings, input_bytes, uploaded_file.name, reviewer, decisions
+            records,
+            findings,
+            input_bytes,
+            uploaded_file.name,
+            reviewer,
+            decisions,
         )
         reports_dir = Path(__file__).resolve().parent / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
@@ -196,7 +202,9 @@ if st.button("Save report to the reports folder"):
 
         report_bytes, checksum_bytes = save_audit_report(report_text, output_path)
         st.session_state["saved_audit"] = (
-            str(output_path), report_bytes, checksum_bytes
+            str(output_path),
+            report_bytes,
+            checksum_bytes,
         )
 
     except (ValueError, OSError) as exc:

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-# Read ADOP JSONL telemetry records. 
+# Read ADOP JSONL telemetry records.
 # Each line in an ADOP .jsonl file represents one telemetry record.
 def read_adop_records(file_path: str | Path) -> list[dict[str, Any]]:
     path = Path(file_path)
@@ -35,6 +35,7 @@ def read_adop_records(file_path: str | Path) -> list[dict[str, Any]]:
 
     return records
 
+
 # Print a summary of ADOP telemetry records.
 def summarize_records(records: list[dict[str, Any]]) -> None:
     for record in records:
@@ -46,3 +47,20 @@ def summarize_records(records: list[dict[str, Any]]) -> None:
             f"{record.get('target_resource', 'unknown')} | "
             f"{record.get('result_status', 'unknown')}"
         )
+
+
+def identify_scenario(records: list[dict[str, Any]]) -> str:
+    # Identify the scenario from the ADOP records.
+    scenarios = {
+        record.get("scenario_tag")
+        for record in records
+        if record.get("scenario_tag") in ("clean", "poisoned")
+    }
+
+    if len(scenarios) == 1:
+        scenario = next(iter(scenarios))
+    elif len(scenarios) > 1:
+        scenario = "mixed"
+    else:
+        scenario = "unknown"
+    return scenario

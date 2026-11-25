@@ -2,7 +2,7 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
-from agentward.reader import read_adop_records
+from agentward.reader import identify_scenario, read_adop_records
 from agentward.evaluator import evaluate_records
 from agentward.report import generate_report, save_report
 
@@ -23,19 +23,7 @@ def analyze(input_file: str, output_file: str | None = None) -> None:
         reports_dir = Path("reports")
         reports_dir.mkdir(parents=True, exist_ok=True)
 
-        # Identify the scenario from the ADOP records.
-        scenarios = {
-            record.get("scenario_tag")
-            for record in records
-            if record.get("scenario_tag") in ("clean", "poisoned")
-        }
-
-        if len(scenarios) == 1:
-            scenario = next(iter(scenarios))
-        elif len(scenarios) > 1:
-            scenario = "mixed"
-        else:
-            scenario = "unknown"
+        scenario = identify_scenario(records)
 
         # Include the scenario, date, and time in the report filename.
         timestamp = datetime.now().strftime("%m-%d-%Y_%H-%M-%S")
