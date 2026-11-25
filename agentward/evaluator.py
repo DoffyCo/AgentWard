@@ -61,6 +61,47 @@ APPROVED_MEMORY_NAMESPACES = set(
 )
 
 
+def _load_resource_tags() -> dict[Path, dict[str, Any]]:
+    # Load the declared resource classifications from ADOP.
+    with (REPO_ROOT / "resource-tags.json").open("r", encoding="utf-8") as file:
+        config = json.load(file)
+
+    if not isinstance(config, dict) or not isinstance(config.get("resources"), list):
+        raise ValueError("Invalid ADOP resource tag map.")
+
+    resources = {}
+    for resource in config["resources"]:
+        if not isinstance(resource, dict):
+            raise ValueError("Invalid resource classification.")
+
+        path = resource.get("path")
+        tags = resource.get("tags")
+        approval = resource.get("requires_prior_approval")
+        actors = resource.get("approved_actors")
+
+        if (
+            not isinstance(path, str) or not path.strip()
+            or not isinstance(tags, list) or not tags
+            or not all(isinstance(tag, str) and tag.strip() for tag in tags)
+            or not isinstance(approval, bool)
+            or not isinstance(actors, list)
+            or not all(isinstance(actor, str) and actor.strip() for actor in actors)
+        ):
+            raise ValueError("Invalid resource classification fields.")
+
+        resolved = (REPO_ROOT / path).resolve()
+        if Path(path).is_absolute() or not resolved.is_relative_to(REPO_ROOT.resolve()):
+            raise ValueError("Resource tag path must be repository-relative.")
+        if resolved in resources:
+            raise ValueError("Duplicate resource classification.")
+        resources[resolved] = resource
+
+    return resources
+
+
+RESOURCE_TAGS = _load_resource_tags()
+
+
 SEVERITY_POINTS = {"high": 30, "medium": 15, "low": 5}
 SEVERITY_RANK = {"high": 3, "medium": 2, "low": 1}
 
@@ -395,6 +436,81 @@ def _check_aw002(record: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
+def _check_aw003(record: dict[str, Any]) -> list[dict[str, str]]:
+    # Review explicitly classified resources rather than filename keywords.
+    server = record.get("server", "")
+    tool = record.get("tool_name", "")
+    arguments = record.get("arguments", {})
+    status = record.get("result_status", "")
+    target = record.get("target_resource", "")
+
+    if not isinstance(arguments, dict):
+        arguments = {}
+
+    paths = []
+    if (
+        server == "filesystem"
+        and tool in ("read_text_file", "write_file", "get_file_info")
+    ) or (server == "git" and tool in ("git_add", "git_show_worktree")):
+        paths.append(arguments.get("path", target))
+    elif server == "git" and tool == "git_diff":
+        # Inspect explicit pathspecs and output destinations.
+        pathspec = arguments.get("pathspec", ".")
+        if isinstance(pathspec, str):
+            paths.extend(token for token in pathspec.split() if not token.startswith("-"))
+        paths.extend(_get_git_output_paths(arguments))
+
+    matches = []
+    seen = set()
+    for path in paths:
+        if not isinstance(path, str) or not path.strip():
+            continue
+        try:
+            resolved = (REPO_ROOT / path).resolve()
+        except (ValueError, OSError, RuntimeError):
+            continue
+
+        if resolved in seen or resolved not in RESOURCE_TAGS:
+            continue
+        seen.add(resolved)
+        resource = RESOURCE_TAGS[resolved]
+        tags = ", ".join(resource["tags"])
+        reason = f"Resource '{resource['path']}' has declared tags: {tags}. "
+
+        if resource["requires_prior_approval"]:
+            severity = "high" if status == "success" else "medium"
+            actors = ", ".join(resource["approved_actors"]) or "none listed"
+            reason += (
+                f"Prior approval is required; listed approved actors: {actors}. "
+                "ADOP telemetry does not establish actor identity or prior approval. "
+                "Authorization requires stakeholder review. "
+            )
+        else:
+            severity = "low"
+            reason += "The resource map does not require prior approval. "
+
+        if status == "success":
+            reason += "The tool call was recorded as successful."
+        elif status == "error":
+            reason += "The tool call returned an error; successful access is not established."
+        elif status == "blocked":
+            reason += "The tool call was recorded as blocked."
+        else:
+            reason += "The outcome of the tool call could not be established."
+
+        matches.append(_policy_match("AW-003", "sensitive_resource_access", severity, reason))
+
+    if not matches:
+        return []
+
+    # Combine classified resources into one policy match per record.
+    severity = max((match["severity"] for match in matches), key=SEVERITY_RANK.get)
+    return [_policy_match(
+        "AW-003", "sensitive_resource_access", severity,
+        " ".join(match["reason"] for match in matches),
+    )]
+
+
 def _check_aw004(record: dict[str, Any]) -> list[dict[str, str]]:
     # Evaluate the trust of external information sources.
     server = record.get("server", "")
@@ -474,18 +590,7 @@ def evaluate_record(record: dict[str, Any]) -> list[dict[str, Any]]:
     matches.extend(_check_aw002(record))
 
     # AW-003: Sensitive Resource Access.
-    # Existing v2 logic retained temporarily.
-    if isinstance(target, str) and any(
-        term in target.lower()
-        for term in ("secret", "patient", "phi", "medical", "claims")
-    ):
-        matches.append(_policy_match(
-            "AW-003",
-            "sensitive_resource_access",
-            "high",
-            "The resource name suggests potentially sensitive "
-            "information and requires authorization review.",
-        ))
+    matches.extend(_check_aw003(record))
 
     # AW-004: Approved External Sources.
     matches.extend(_check_aw004(record))

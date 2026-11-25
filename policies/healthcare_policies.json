@@ -30,8 +30,8 @@
         {
             "id": "AW-003",
             "name": "sensitive_resource_access",
-            "description": "Access to sensitive resources should be reviewed against the agent's authorized purpose.",
-            "check": "sensitive_resource"
+            "description": "Access to explicitly classified resources should be reviewed against declared resource tags and prior approval requirements.",
+            "check": "resource_tags"
         },
         {
             "id": "AW-004",
