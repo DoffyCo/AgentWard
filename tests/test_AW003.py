@@ -1,4 +1,5 @@
 import unittest
+
 from agentward.evaluator import evaluate_record, REPO_ROOT
 
 
@@ -21,6 +22,7 @@ def get_aw003_matches(record):
 
 
 class TestAW003(unittest.TestCase):
+
     def test_pci_resource(self):
         matches = get_aw003_matches(create_record("data/customer_sample.csv"))
         self.assertEqual(len(matches), 1)
@@ -45,10 +47,16 @@ class TestAW003(unittest.TestCase):
         self.assertEqual(matches[0]["severity"], "medium")
 
     def test_absolute_path(self):
-        self.assertEqual(len(get_aw003_matches(create_record(str(REPO_ROOT / "data/customer_sample.csv")))), 1)
+        self.assertEqual(
+            len(get_aw003_matches(create_record(str(REPO_ROOT / "data/customer_sample.csv")))),
+            1,
+        )
 
     def test_normalized_path(self):
-        self.assertEqual(len(get_aw003_matches(create_record("data/../data/customer_sample.csv"))), 1)
+        self.assertEqual(
+            len(get_aw003_matches(create_record("data/../data/customer_sample.csv"))),
+            1,
+        )
 
     def test_unclassified_resource(self):
         self.assertEqual(get_aw003_matches(create_record("src/checkout.js")), [])
@@ -62,10 +70,16 @@ class TestAW003(unittest.TestCase):
         self.assertIn("AW-001", evaluate_record(record)[0]["policy_id"])
 
     def test_actual_argument_preferred(self):
-        self.assertEqual(len(get_aw003_matches(create_record("data/customer_sample.csv", target="src/checkout.js"))), 1)
+        self.assertEqual(
+            len(get_aw003_matches(create_record("data/customer_sample.csv", target="src/checkout.js"))),
+            1,
+        )
 
     def test_git_worktree(self):
-        self.assertEqual(len(get_aw003_matches(create_record(".env.example", server="git", tool="git_show_worktree"))), 1)
+        self.assertEqual(
+            len(get_aw003_matches(create_record(".env.example", server="git", tool="git_show_worktree"))),
+            1,
+        )
 
     def test_git_diff_explicit_path(self):
         record = create_record(".env.example", server="git", tool="git_diff")
@@ -73,7 +87,10 @@ class TestAW003(unittest.TestCase):
         self.assertEqual(len(get_aw003_matches(record)), 1)
 
     def test_unrelated_tool(self):
-        self.assertEqual(get_aw003_matches(create_record(".env.example", server="memory", tool="memory_set")), [])
+        self.assertEqual(
+            get_aw003_matches(create_record(".env.example", server="memory", tool="memory_set")),
+            [],
+        )
 
 
 if __name__ == "__main__":

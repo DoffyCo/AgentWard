@@ -7,6 +7,7 @@ from agentward.report import generate_audit_report, save_audit_report
 
 
 class TestAuditReporting(unittest.TestCase):
+
     def setUp(self):
         self.input_bytes = b'{"session_id":"test"}\n'
         self.findings = [{"rank": 1, "severity": "high", "risk_points": 30,
@@ -50,8 +51,14 @@ class TestAuditReporting(unittest.TestCase):
             path = Path(directory) / "report.txt"
             report_bytes, checksum_bytes = save_audit_report(self.report(), path)
             self.assertEqual(path.read_bytes(), report_bytes)
-            self.assertEqual(path.with_suffix(".txt.sha256").read_bytes(), checksum_bytes)
-            self.assertEqual(checksum_bytes.decode().split()[0], hashlib.sha256(path.read_bytes()).hexdigest())
+            self.assertEqual(
+                path.with_suffix(".txt.sha256").read_bytes(),
+                checksum_bytes,
+            )
+            self.assertEqual(
+                checksum_bytes.decode().split()[0],
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+            )
 
     def test_no_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:

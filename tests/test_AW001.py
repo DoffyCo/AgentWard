@@ -31,7 +31,6 @@ def get_aw001_matches(record):
 
 class TestAW001(unittest.TestCase):
 
-    # Test normal filesystem access.
     def test_normal_filesystem_access(self):
         record = create_record(
             "filesystem",
@@ -42,7 +41,6 @@ class TestAW001(unittest.TestCase):
 
         self.assertEqual(get_aw001_matches(record), [])
 
-    # Test normal Git diff.
     def test_normal_git_diff(self):
         record = create_record(
             "git",
@@ -53,7 +51,6 @@ class TestAW001(unittest.TestCase):
 
         self.assertEqual(get_aw001_matches(record), [])
 
-    # Test relative path outside the sandbox.
     def test_relative_path_outside_sandbox(self):
         record = create_record(
             "git",
@@ -67,7 +64,6 @@ class TestAW001(unittest.TestCase):
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["severity"], "high")
 
-    # Test absolute path outside the sandbox.
     def test_absolute_path_outside_sandbox(self):
         path = str(ADOP_ROOT / "data" / "example.txt")
 
@@ -83,7 +79,6 @@ class TestAW001(unittest.TestCase):
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["severity"], "high")
 
-    # Test absolute path inside the sandbox.
     def test_absolute_path_inside_sandbox(self):
         path = str(REPO_ROOT / "src" / "checkout.js")
 
@@ -96,7 +91,6 @@ class TestAW001(unittest.TestCase):
 
         self.assertEqual(get_aw001_matches(record), [])
 
-    # Test Git argument injection with a normal target resource.
     def test_git_argument_injection(self):
         record = create_record(
             "git",
@@ -115,7 +109,6 @@ class TestAW001(unittest.TestCase):
         self.assertIn("unexpected Git option", matches[0]["reason"])
         self.assertIn("outside", matches[0]["reason"])
 
-    # Test Git injection using separate output arguments.
     def test_git_separate_output_argument(self):
         record = create_record(
             "git",
@@ -133,7 +126,6 @@ class TestAW001(unittest.TestCase):
         self.assertEqual(matches[0]["severity"], "high")
         self.assertIn("outside", matches[0]["reason"])
 
-    # Test Git initialization outside the sandbox.
     def test_git_init_outside_sandbox(self):
         record = create_record(
             "git",
@@ -147,7 +139,6 @@ class TestAW001(unittest.TestCase):
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["severity"], "high")
 
-    # Test a failed resource boundary violation.
     def test_failed_boundary_violation(self):
         record = create_record(
             "filesystem",
@@ -163,7 +154,6 @@ class TestAW001(unittest.TestCase):
         self.assertEqual(matches[0]["severity"], "medium")
         self.assertIn("returned an error", matches[0]["reason"])
 
-    # Test a blocked resource boundary violation.
     def test_blocked_boundary_violation(self):
         record = create_record(
             "filesystem",
@@ -178,7 +168,6 @@ class TestAW001(unittest.TestCase):
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["severity"], "medium")
 
-    # Test a relative path that resolves inside the sandbox.
     def test_relative_path_inside_sandbox(self):
         record = create_record(
             "filesystem",
