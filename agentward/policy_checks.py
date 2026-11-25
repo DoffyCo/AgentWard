@@ -3,8 +3,13 @@ from pathlib import Path
 from typing import Any
 
 from .config import (
-    ADOP_ROOT, REPO_ROOT, POLICY_CONFIG, APPROVED_EXTERNAL_SOURCES,
-    APPROVED_MEMORY_NAMESPACES, RESOURCE_TAGS, RESTRICTED_SOURCE_DIRECTORIES,
+    ADOP_ROOT,
+    REPO_ROOT,
+    POLICY_CONFIG,
+    APPROVED_EXTERNAL_SOURCES,
+    APPROVED_MEMORY_NAMESPACES,
+    RESOURCE_TAGS,
+    RESTRICTED_SOURCE_DIRECTORIES,
 )
 from .risk import SEVERITY_RANK
 
@@ -31,6 +36,7 @@ def _is_outside_sandbox(path: str, base: Path) -> bool:
     return not resolved_path.is_relative_to(REPO_ROOT.resolve())
 
 
+# AW-001: Approved resource boundary.
 def _check_aw001(record: dict[str, Any]) -> list[dict[str, str]]:
     # Evaluate resource boundaries using actual tool arguments.
     server = record.get("server", "")
@@ -222,6 +228,7 @@ def _get_git_output_paths(
     return list(dict.fromkeys(paths))
 
 
+# AW-002: Approved data destinations.
 def _check_aw002(record: dict[str, Any]) -> list[dict[str, str]]:
     # Evaluate data movement and persistence destinations.
     server = record.get("server", "")
@@ -339,6 +346,7 @@ def _check_aw002(record: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
+# AW-003: Sensitive resource access.
 def _check_aw003(record: dict[str, Any]) -> list[dict[str, str]]:
     # Review explicitly classified resources rather than filename keywords.
     server = record.get("server", "")
@@ -364,7 +372,7 @@ def _check_aw003(record: dict[str, Any]) -> list[dict[str, str]]:
         paths.extend(_get_git_output_paths(arguments))
 
     matches = []
-    seen = set()
+    seen_paths = set()
     for path in paths:
         if not isinstance(path, str) or not path.strip():
             continue
@@ -373,9 +381,9 @@ def _check_aw003(record: dict[str, Any]) -> list[dict[str, str]]:
         except (ValueError, OSError, RuntimeError):
             continue
 
-        if resolved in seen or resolved not in RESOURCE_TAGS:
+        if resolved in seen_paths or resolved not in RESOURCE_TAGS:
             continue
-        seen.add(resolved)
+        seen_paths.add(resolved)
         resource = RESOURCE_TAGS[resolved]
         tags = ", ".join(resource["tags"])
         reason = f"Resource '{resource['path']}' has declared tags: {tags}. "
@@ -408,12 +416,15 @@ def _check_aw003(record: dict[str, Any]) -> list[dict[str, str]]:
 
     # Combine classified resources into one policy match per record.
     severity = max((match["severity"] for match in matches), key=SEVERITY_RANK.get)
-    return [_policy_match(
-        "AW-003", "sensitive_resource_access", severity,
-        " ".join(match["reason"] for match in matches),
-    )]
+    return [
+        _policy_match(
+            "AW-003", "sensitive_resource_access", severity,
+            " ".join(match["reason"] for match in matches),
+        )
+    ]
 
 
+# AW-004: Approved external sources.
 def _check_aw004(record: dict[str, Any]) -> list[dict[str, str]]:
     # Evaluate the trust of external information sources.
     server = record.get("server", "")
@@ -478,6 +489,7 @@ def _check_aw004(record: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
+# AW-005: Sensitive data persistence.
 def _check_aw005(
     record: dict[str, Any], session_records: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
@@ -494,27 +506,27 @@ def _check_aw005(
     value = " ".join(value.split())
     session = record.get("session_id")
     task = record.get("task_id")
-    seq = record.get("seq")
+    sequence = record.get("seq")
     if not isinstance(session, str) or not session.strip():
         return []
-    if not isinstance(task, str) or not task.strip() or type(seq) is not int:
+    if not isinstance(task, str) or not task.strip() or type(sequence) is not int:
         return []
 
     reasons = []
     for source in session_records:
-        source_seq = source.get("seq")
+        source_sequence = source.get("seq")
         if (source.get("session_id") != session or source.get("task_id") != task
-                or type(source_seq) is not int or source_seq >= seq
+                or type(source_sequence) is not int or source_sequence >= sequence
                 or source.get("result_status") != "success"):
             continue
         if (source.get("server"), source.get("tool_name")) not in (
             ("filesystem", "read_text_file"), ("git", "git_show_worktree"),
         ):
             continue
-        source_args = source.get("arguments")
-        if not isinstance(source_args, dict):
+        source_arguments = source.get("arguments")
+        if not isinstance(source_arguments, dict):
             continue
-        path = source_args.get("path")
+        path = source_arguments.get("path")
         summary = source.get("result_summary")
         if not isinstance(path, str) or not path.strip() or not isinstance(summary, str):
             continue
@@ -538,23 +550,32 @@ def _check_aw005(
             continue
         reasons.append(
             f"Memory value matches recorded content from resource '{path}' "
-            f"(sequence {source_seq}, {classification}) in the same session and task."
+            f"(sequence {source_sequence}, {classification}) in the same session and task."
         )
 
     if not reasons:
         return []
     status = record.get("result_status")
     severity = "high" if status == "success" else "medium"
-    outcome = {
-        "success": "The memory write was recorded as successful.",
-        "error": "The memory write returned an error; successful persistence is not established.",
-        "blocked": "The memory write was recorded as blocked.",
-    }.get(status if isinstance(status, str) else "", "The memory write outcome is unknown.")
-    return [_policy_match(
-        "AW-005", "sensitive_data_persistence", severity,
-        " ".join(dict.fromkeys(reasons)) + " " + outcome
-        + " Content matching supports a potential data-flow relationship, not proof of complete lineage.",
-    )]
+    # Distinguish successful persistence from unsuccessful attempts.
+    if isinstance(status, str) and status == "success":
+        outcome = "The memory write was recorded as successful."
+    elif isinstance(status, str) and status == "error":
+        outcome = (
+            "The memory write returned an error; "
+            "successful persistence is not established."
+        )
+    elif isinstance(status, str) and status == "blocked":
+        outcome = "The memory write was recorded as blocked."
+    else:
+        outcome = "The memory write outcome is unknown."
+    return [
+        _policy_match(
+            "AW-005", "sensitive_data_persistence", severity,
+            " ".join(dict.fromkeys(reasons)) + " " + outcome
+            + " Content matching supports a potential data-flow relationship, not proof of complete lineage.",
+        )
+    ]
 
 
 def _is_manifest_path(record: dict[str, Any]) -> bool:
@@ -594,6 +615,7 @@ def _dependency_issues(record: dict[str, Any]) -> tuple[list[str], bool]:
         return ["Manifest content could not be validated."], True
 
 
+# AW-006: Dependency integrity.
 def _check_aw006(record: dict[str, Any], records: list[dict[str, Any]]) -> list[dict[str, str]]:
     operation = (record.get("server"), record.get("tool_name"))
     issues = []
@@ -604,49 +626,58 @@ def _check_aw006(record: dict[str, Any], records: list[dict[str, Any]]) -> list[
     elif operation in (("git", "git_add"), ("git", "git_commit")):
         if operation[1] == "git_add" and not _is_manifest_path(record):
             return []
-        session, task, seq = (record.get(k) for k in ("session_id", "task_id", "seq"))
-        if not isinstance(session, str) or not session.strip() or not isinstance(task, str) or not task.strip() or type(seq) is not int:
+        session, task, sequence = (record.get(k) for k in ("session_id", "task_id", "seq"))
+        if (
+            not isinstance(session, str) or not session.strip()
+            or not isinstance(task, str) or not task.strip()
+            or type(sequence) is not int
+        ):
             return []
         # Track the latest successful manifest write and explicit staging event.
         # Other tasks can invalidate evidence, but cannot establish same-task correlation.
         pending = None
         staged = None
-        prior = sorted((r for r in records if r.get("session_id") == session
-                        and type(r.get("seq")) is int and r["seq"] < seq), key=lambda r: r["seq"])
-        for event in prior:
+        prior_events = sorted((event_record for event_record in records if event_record.get("session_id") == session
+                        and type(event_record.get("seq")) is int and event_record["seq"] < sequence), key=lambda event_record: event_record["seq"])
+        for event in prior_events:
             if event.get("result_status") != "success":
                 continue
-            kind = (event.get("server"), event.get("tool_name"))
-            if kind == ("filesystem", "write_file") and _is_manifest_path(event):
+            event_operation = (event.get("server"), event.get("tool_name"))
+            if event_operation == ("filesystem", "write_file") and _is_manifest_path(event):
                 pending = (*_dependency_issues(event), event["seq"], event.get("task_id"))
-            elif kind == ("git", "git_add"):
+            elif event_operation == ("git", "git_add"):
                 if _is_manifest_path(event):
                     staged = (pending, event["seq"], event.get("task_id")) if pending else None
                 else:
                     # A broad or ambiguous staging operation may change the index.
-                    args = event.get("arguments")
-                    path = args.get("path") if isinstance(args, dict) else None
-                    if not isinstance(path, str) or path.strip() in ("", ".", "./", "..") or any(c in path for c in "*?["):
+                    event_arguments = event.get("arguments")
+                    path = event_arguments.get("path") if isinstance(event_arguments, dict) else None
+                    if not isinstance(path, str) or path.strip() in ("", ".", "./", "..") or any(character in path for character in "*?["):
                         staged = None
-            elif kind == ("git", "git_commit") or kind == ("git", "git_init"):
+            elif event_operation == ("git", "git_commit") or event_operation == ("git", "git_init"):
                 staged = None
-                if kind[1] == "git_init":
+                if event_operation[1] == "git_init":
                     pending = None
         if operation[1] == "git_add" and pending and pending[3] == task:
-            issues, uncertain, write_seq, _ = pending
-            evidence = f" Correlated with manifest write at sequence {write_seq}."
+            issues, uncertain, write_sequence, _ = pending
+            evidence = f" Correlated with manifest write at sequence {write_sequence}."
         elif operation[1] == "git_commit" and staged and staged[2] == task and staged[0][3] == task:
-            issues, uncertain, write_seq, _ = staged[0]
-            evidence = (f" Correlated with manifest write at sequence {write_seq} and staging at sequence {staged[1]}."
+            issues, uncertain, write_sequence, _ = staged[0]
+            evidence = (f" Correlated with manifest write at sequence {write_sequence} and staging at sequence {staged[1]}."
                         " The committed tree was not independently verified.")
     if not issues:
         return []
     status = record.get("result_status")
     severity = "high" if status == "success" and not uncertain else "medium"
-    outcome = (" The operation was recorded as successful." if status == "success" else
-               " The operation was recorded as blocked." if status == "blocked" else
-               " The operation returned an error; success is not established." if status == "error" else
-               " The operation outcome is unknown.")
+    # Distinguish successful operations from unsuccessful attempts.
+    if status == "success":
+        outcome = " The operation was recorded as successful."
+    elif status == "blocked":
+        outcome = " The operation was recorded as blocked."
+    elif status == "error":
+        outcome = " The operation returned an error; success is not established."
+    else:
+        outcome = " The operation outcome is unknown."
     return [_policy_match("AW-006", "dependency_integrity", severity,
                           " ".join(issues) + evidence + outcome)]
 
@@ -666,39 +697,44 @@ def _operation_signature(record: dict[str, Any]) -> tuple[str, str, str] | None:
         return None
 
 
+# AW-007: Excessive tool usage.
 def _check_aw007(record: dict[str, Any], records: list[dict[str, Any]]) -> list[dict[str, str]]:
     # Count activity up to this event, within the same session and task.
-    session, task, seq = (record.get(k) for k in ("session_id", "task_id", "seq"))
-    if not isinstance(session, str) or not session.strip() or not isinstance(task, str) or not task.strip() or type(seq) is not int:
+    session, task, sequence = (record.get(k) for k in ("session_id", "task_id", "seq"))
+    if (
+        not isinstance(session, str) or not session.strip()
+        or not isinstance(task, str) or not task.strip()
+        or type(sequence) is not int
+    ):
         return []
-    prior = sorted((r for r in records if r.get("session_id") == session
-                    and r.get("task_id") == task and type(r.get("seq")) is int
-                    and r["seq"] < seq), key=lambda r: r["seq"])
+    prior_events = sorted((event_record for event_record in records if event_record.get("session_id") == session
+                    and event_record.get("task_id") == task and type(event_record.get("seq")) is int
+                    and event_record["seq"] < sequence), key=lambda event_record: event_record["seq"])
     # Ambiguous sequence numbers cannot establish reliable ordering.
-    if len({r["seq"] for r in prior}) != len(prior) or sum(
-        r.get("session_id") == session and r.get("task_id") == task and r.get("seq") == seq
-        for r in records
+    if len({event_record["seq"] for event_record in prior_events}) != len(prior_events) or sum(
+        event_record.get("session_id") == session and event_record.get("task_id") == task and event_record.get("seq") == sequence
+        for event_record in records
     ) > 1:
         return []
     signature = _operation_signature(record)
     if signature is None:
         return []
-    total = 1 + sum(_operation_signature(r) is not None for r in prior)
-    repeated = 1 + sum(_operation_signature(r) == signature for r in prior)
-    failures = 0
+    total_calls = 1 + sum(_operation_signature(event_record) is not None for event_record in prior_events)
+    repeated_calls = 1 + sum(_operation_signature(event_record) == signature for event_record in prior_events)
+    failed_retries = 0
     if record.get("result_status") == "error":
-        failures = 1
-        for event in reversed(prior):
+        failed_retries = 1
+        for event in reversed(prior_events):
             if event.get("result_status") != "error" or _operation_signature(event) != signature:
                 break
-            failures += 1
+            failed_retries += 1
     thresholds = POLICY_CONFIG["tool_usage_thresholds"]
     reasons = []
     severities = []
     for prefix, count, label in (
-        ("task_calls", total, "Recorded tool calls within this task"),
-        ("repeated_calls", repeated, "Identical tool calls within this task"),
-        ("failed_retries", failures, "Consecutive identical calls returning errors"),
+        ("task_calls", total_calls, "Recorded tool calls within this task"),
+        ("repeated_calls", repeated_calls, "Identical tool calls within this task"),
+        ("failed_retries", failed_retries, "Consecutive identical calls returning errors"),
     ):
         for severity in ("medium", "high"):
             threshold = thresholds[f"{prefix}_{severity}"]
@@ -707,7 +743,9 @@ def _check_aw007(record: dict[str, Any], records: list[dict[str, Any]]) -> list[
                 severities.append(severity)
     if not reasons:
         return []
-    return [_policy_match(
-        "AW-007", "excessive_tool_usage", max(severities, key=SEVERITY_RANK.get),
-        " ".join(reasons) + " Potential excessive activity; recorded counts do not establish resource exhaustion or service disruption.",
-    )]
+    return [
+        _policy_match(
+            "AW-007", "excessive_tool_usage", max(severities, key=SEVERITY_RANK.get),
+            " ".join(reasons) + " Potential excessive activity; recorded counts do not establish resource exhaustion or service disruption.",
+        )
+    ]

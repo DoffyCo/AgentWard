@@ -4,7 +4,8 @@ from .config import APPROVED_EXTERNAL_SOURCES
 
 
 def _find_prior_sources(
-    record: dict[str, Any], records: list[dict[str, Any]],
+    record: dict[str, Any],
+    records: list[dict[str, Any]],
     matches: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
     # Only correlate findings involving resource access, data movement,
@@ -36,6 +37,7 @@ def _find_prior_sources(
     if len(sequences) != len(set(sequences)) or sequence not in sequences:
         return []
 
+    # Identify earlier successful fetches from unapproved sources.
     sources = []
     for event in sorted(task_records, key=lambda event: event["seq"]):
         if event["seq"] >= sequence:

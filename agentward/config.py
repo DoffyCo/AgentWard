@@ -50,7 +50,10 @@ def _load_policy_config() -> dict[str, Any]:
 
     dependencies = config.get("approved_dependencies")
     if not isinstance(dependencies, dict) or not all(
-        isinstance(name, str) and name.strip() and isinstance(version, str) and version.strip()
+        isinstance(name, str)
+        and name.strip()
+        and isinstance(version, str)
+        and version.strip()
         for name, version in dependencies.items()
     ):
         raise ValueError("Invalid approved dependency configuration.")
@@ -61,7 +64,11 @@ def _load_policy_config() -> dict[str, Any]:
     for prefix in ("task_calls", "repeated_calls", "failed_retries"):
         medium = thresholds.get(prefix + "_medium")
         high = thresholds.get(prefix + "_high")
-        if type(medium) is not int or type(high) is not int or not 1 <= medium < high:
+        if (
+            type(medium) is not int
+            or type(high) is not int
+            or not 1 <= medium < high
+        ):
             raise ValueError(f"Invalid tool usage thresholds: {prefix}")
 
     return config
@@ -83,7 +90,10 @@ def _load_resource_tags() -> dict[Path, dict[str, Any]]:
     with (REPO_ROOT / "resource-tags.json").open("r", encoding="utf-8") as file:
         config = json.load(file)
 
-    if not isinstance(config, dict) or not isinstance(config.get("resources"), list):
+    if (
+        not isinstance(config, dict)
+        or not isinstance(config.get("resources"), list)
+    ):
         raise ValueError("Invalid ADOP resource tag map.")
 
     resources = {}
@@ -107,7 +117,10 @@ def _load_resource_tags() -> dict[Path, dict[str, Any]]:
             raise ValueError("Invalid resource classification fields.")
 
         resolved = (REPO_ROOT / path).resolve()
-        if Path(path).is_absolute() or not resolved.is_relative_to(REPO_ROOT.resolve()):
+        if (
+            Path(path).is_absolute()
+            or not resolved.is_relative_to(REPO_ROOT.resolve())
+        ):
             raise ValueError("Resource tag path must be repository-relative.")
         if resolved in resources:
             raise ValueError("Duplicate resource classification.")
@@ -123,6 +136,10 @@ RESOURCE_TAGS = _load_resource_tags()
 RESTRICTED_SOURCE_DIRECTORIES = []
 for directory in POLICY_CONFIG["restricted_source_directories"]:
     resolved = (REPO_ROOT / directory).resolve()
-    if Path(directory).is_absolute() or not resolved.is_relative_to(REPO_ROOT.resolve()) or resolved == REPO_ROOT.resolve():
+    if (
+        Path(directory).is_absolute()
+        or not resolved.is_relative_to(REPO_ROOT.resolve())
+        or resolved == REPO_ROOT.resolve()
+    ):
         raise ValueError("Restricted source directory must be inside the repository.")
     RESTRICTED_SOURCE_DIRECTORIES.append(resolved)

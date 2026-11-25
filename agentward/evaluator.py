@@ -2,26 +2,45 @@ from typing import Any
 
 # Preserve existing evaluator imports for callers and tests.
 from .config import (
-    ADOP_ROOT, REPO_ROOT, POLICY_PATH, POLICY_CONFIG,
-    APPROVED_EXTERNAL_SOURCES, APPROVED_MEMORY_NAMESPACES,
-    RESOURCE_TAGS, RESTRICTED_SOURCE_DIRECTORIES,
-    _load_policy_config, _load_resource_tags,
+    ADOP_ROOT,
+    REPO_ROOT,
+    POLICY_PATH,
+    POLICY_CONFIG,
+    APPROVED_EXTERNAL_SOURCES,
+    APPROVED_MEMORY_NAMESPACES,
+    RESOURCE_TAGS,
+    RESTRICTED_SOURCE_DIRECTORIES,
+    _load_policy_config,
+    _load_resource_tags,
 )
 from .policy_checks import (
-    _policy_match, _is_outside_sandbox, _get_git_output_paths,
-    _check_aw001, _check_aw002, _check_aw003, _check_aw004,
-    _check_aw005, _check_aw006, _check_aw007,
-    _is_manifest_path, _dependency_issues, _operation_signature,
+    _policy_match,
+    _is_outside_sandbox,
+    _get_git_output_paths,
+    _check_aw001,
+    _check_aw002,
+    _check_aw003,
+    _check_aw004,
+    _check_aw005,
+    _check_aw006,
+    _check_aw007,
+    _is_manifest_path,
+    _dependency_issues,
+    _operation_signature,
 )
 from .provenance import _find_prior_sources
 from .risk import (
-    SEVERITY_POINTS, SEVERITY_RANK, group_findings,
-    calculate_risk_score, classify_risk,
+    SEVERITY_POINTS,
+    SEVERITY_RANK,
+    group_findings,
+    calculate_risk_score,
+    classify_risk,
 )
 
 
 def evaluate_record(
-    record: dict[str, Any], session_records: list[dict[str, Any]] | None = None,
+    record: dict[str, Any],
+    session_records: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     # Return one combined alert per ADOP record,
     # even if several policies match.
@@ -92,7 +111,7 @@ def evaluate_record(
         "tool": tool,
         "target": target,
 
-        # Additional evidence for future reporting improvements.
+        # Recorded execution evidence.
         "arguments": record.get("arguments", {}),
         "result_status": record.get("result_status", ""),
         "seq": record.get("seq"),
