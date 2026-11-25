@@ -1,4 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
+from hashlib import sha256
+from pathlib import Path
+import json
 from typing import Any
 from agentward.evaluator import calculate_risk_score, classify_risk
 
@@ -111,3 +114,54 @@ def generate_report(records: list[dict[str, Any]], findings: list[dict[str, Any]
 def save_report(report: str, output_path: str) -> None:
     with open(output_path, "w", encoding="utf-8") as file:
         file.write(report)
+
+
+DISPOSITIONS = ("Needs review", "Escalate", "Dismiss")
+
+
+def generate_audit_report(records, findings, input_bytes, input_name, reviewer, decisions):
+    # Require a reviewer and a disposition for every grouped alert.
+    if not reviewer.strip():
+        raise ValueError("Enter a reviewer name or identifier.")
+    if set(decisions) != {finding["rank"] for finding in findings}:
+        raise ValueError("Decisions must match the ranked alerts.")
+
+    lines = [
+        generate_report(records, findings),
+        "", "Stakeholder review", "-" * 60,
+        f"Reviewer: {json.dumps(reviewer.strip(), ensure_ascii=False)}",
+        f"Review timestamp (UTC): {datetime.now(timezone.utc).strftime('%Y-%m-%d T %H:%M:%S')}",
+        f"Input file: {json.dumps(input_name, ensure_ascii=False)}",
+        f"Input SHA-256: {sha256(input_bytes).hexdigest()}",
+        "Reviewer identity is self-reported, not authenticated.",
+    ]
+    for finding in findings:
+        rank = finding["rank"]
+        decision = decisions[rank]
+        if decision["disposition"] not in DISPOSITIONS:
+            raise ValueError("Invalid stakeholder disposition.")
+        lines.extend([
+            "", f"Alert #{rank}",
+            f"Disposition: {decision['disposition']}",
+            f"Rationale: {json.dumps(decision['rationale'], ensure_ascii=False)}",
+        ])
+    if not findings:
+        lines.append("No alerts require disposition.")
+    lines.append("Checksums support integrity comparison, not authentication or tamper-proof storage.")
+    return "\n".join(lines)
+
+
+def save_audit_report(report: str, output_path: Path) -> tuple[bytes, bytes]:
+    # Hash the exact UTF-8 bytes written to disk, including line endings.
+    report_bytes = report.encode("utf-8")
+    checksum_bytes = f"{sha256(report_bytes).hexdigest()}  {output_path.name}\n".encode("utf-8")
+    checksum_path = output_path.with_suffix(output_path.suffix + ".sha256")
+    with output_path.open("xb") as file:
+        file.write(report_bytes)
+    try:
+        with checksum_path.open("xb") as file:
+            file.write(checksum_bytes)
+    except Exception:
+        output_path.unlink(missing_ok=True)
+        raise
+    return report_bytes, checksum_bytes

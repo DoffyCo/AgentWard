@@ -1,7 +1,8 @@
 import tempfile
 from pathlib import Path
 from datetime import datetime
-from agentward.report import generate_report, save_report, format_timestamp
+from hashlib import sha256
+from agentward.report import generate_audit_report, save_audit_report, format_timestamp, DISPOSITIONS
 import streamlit as st
 
 from agentward.reader import read_adop_records
@@ -23,12 +24,23 @@ st.info(
 uploaded_file = st.file_uploader("Upload an ADOP JSONL file", type=["jsonl", "txt"])
 
 if uploaded_file is None:
+    st.session_state.pop("audit_input", None)
+    st.session_state.pop("saved_audit", None)
     st.write("Upload a telemetry file to review its findings.")
     st.stop()
 
+# Reset review state when the selected input changes.
+input_bytes = uploaded_file.getvalue()
+input_identity = (uploaded_file.name, sha256(input_bytes).hexdigest())
+if st.session_state.get("audit_input") != input_identity:
+    for key in list(st.session_state.keys()):
+        if key.startswith(("decision_", "rationale_")) or key in ("reviewer", "saved_audit"):
+            del st.session_state[key]
+    st.session_state["audit_input"] = input_identity
+
 try:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".jsonl") as temp_file:
-        temp_file.write(uploaded_file.getvalue())
+        temp_file.write(input_bytes)
         temp_path = Path(temp_file.name)
 
     records = read_adop_records(temp_path)
@@ -69,35 +81,7 @@ st.caption(f"Flagged events: {sum(f.get('occurrence_count', 1) for f in findings
 metric4.metric("Records analyzed", len(records))
 
 st.caption(f"ADOP session: {session_id} · Scenario: {scenario}")
-st.subheader("Save assessment")
-
-if st.button("Save report to the reports folder"):
-    reports_dir = Path(__file__).resolve().parent / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-
-    # Include the scenario, date, and time in the report filename.
-    timestamp = datetime.now().strftime("%m-%d-%Y_%H-%M-%S")
-    input_name = Path(uploaded_file.name).stem
-    base_name = f"{input_name}-{scenario}-assessment-{timestamp}"
-
-    output_path = reports_dir / f"{base_name}.txt"
-    counter = 1
-
-    # Prevent existing reports from being overwritten.
-    while output_path.exists():
-        output_path = reports_dir / f"{base_name}-{counter}.txt"
-        counter += 1
-
-    report_text = generate_report(records, findings)
-    save_report(report_text, str(output_path))
-
-    st.success(f"Report saved to: {output_path}")
-    st.download_button(
-        "Download saved report",
-        data=report_text,
-        file_name=output_path.name,
-        mime="text/plain",
-    )
+decisions = {}
 
 st.subheader("Ranked alerts")
 
@@ -153,16 +137,50 @@ else:
             rationale_key = f"rationale_{finding.get('rank')}"
 
             st.write("**Stakeholder decision**")
-            st.selectbox(
+            disposition = st.selectbox(
                 "Choose a disposition",
-                ["Needs review", "Escalate", "Dismiss"],
+                DISPOSITIONS,
                 key=decision_key,
             )
-            st.text_input(
+            rationale = st.text_input(
                 "Decision rationale (optional)",
                 key=rationale_key,
                 placeholder="Briefly explain the decision",
             )
+
+            decisions[finding["rank"]] = {"disposition": disposition, "rationale": rationale}
+
+st.subheader("Save assessment")
+reviewer = st.text_input("Reviewer name or identifier", key="reviewer")
+st.caption("Input SHA-256: " + input_identity[1])
+
+if st.button("Save report to the reports folder"):
+    try:
+        report_text = generate_audit_report(records, findings, input_bytes, uploaded_file.name, reviewer, decisions)
+        reports_dir = Path(__file__).resolve().parent / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%m-%d-%Y_%H-%M-%S")
+        input_name = Path(uploaded_file.name).stem
+        base_name = f"{input_name}-{scenario}-assessment-{timestamp}"
+        output_path = reports_dir / f"{base_name}.txt"
+        counter = 1
+        # Avoid overwriting either an assessment or its checksum.
+        while output_path.exists() or output_path.with_suffix(".txt.sha256").exists():
+            output_path = reports_dir / f"{base_name}-{counter}.txt"
+            counter += 1
+        report_bytes, checksum_bytes = save_audit_report(report_text, output_path)
+        st.session_state["saved_audit"] = (str(output_path), report_bytes, checksum_bytes)
+    except (ValueError, OSError) as exc:
+        st.error(str(exc))
+
+# Keep the last saved snapshot available across dashboard reruns.
+saved_audit = st.session_state.get("saved_audit")
+if saved_audit:
+    saved_path, report_bytes, checksum_bytes = saved_audit
+    st.success(f"Last saved report: {saved_path}")
+    st.caption("Downloads contain the last saved snapshot. Save again to include any changes.")
+    st.download_button("Download saved report", data=report_bytes, file_name=Path(saved_path).name, mime="text/plain")
+    st.download_button("Download report checksum", data=checksum_bytes, file_name=Path(saved_path).name + ".sha256", mime="text/plain")
 
 st.divider()
 st.caption(

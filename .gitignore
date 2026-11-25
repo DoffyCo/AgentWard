@@ -15,3 +15,7 @@ reports/*.txt
 
 # Local environment configuration
 .env
+
+# Ignore generated assessment reports and checksum files
+reports/*.txt
+reports/*.sha256
