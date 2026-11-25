@@ -63,8 +63,9 @@ else:
 st.subheader("Assessment")
 metric1, metric2, metric3, metric4 = st.columns(4)
 metric1.metric("Risk band", risk_band)
-metric2.metric("Heuristic risk points", score)
-metric3.metric("Alerts", len(findings))
+metric2.metric("Heuristic risk score", f"{score} points")
+metric3.metric("Grouped alerts", len(findings))
+st.caption(f"Flagged events: {sum(f.get('occurrence_count', 1) for f in findings)}. Score is an uncapped cumulative total; risk band follows highest severity.")
 metric4.metric("Records analyzed", len(records))
 
 st.caption(f"ADOP session: {session_id} · Scenario: {scenario}")
@@ -118,7 +119,12 @@ else:
                 st.write(f"**Target:** {finding.get('target') or 'unknown'}")
                 st.write(f"**Server / tool:** {finding.get('server') or 'unknown'} / "
                          f"{finding.get('tool') or 'unknown'}")
-                st.write(f"**Reason:** {finding.get('reason') or 'No reason provided.'}")
+                st.text(f"Occurrences: {finding.get('occurrence_count', 1)}")
+                for event in finding.get("events", [finding]):
+                    st.text(f"Sequence: {event.get('seq')} | Timestamp: {event.get('timestamp')}")
+                    st.text(f"Execution status: {event.get('result_status') or 'unknown'}")
+                    st.text(f"Severity: {event['severity']} | Policies: {event['policy_id']}")
+                    st.text(event["reason"])
 
             with right:
                 provenance = finding.get("provenance_flag", "INCOMPLETE")

@@ -30,11 +30,12 @@ def generate_report(records: list[dict[str, Any]], findings: list[dict[str, Any]
         f"ADOP Session: {session_id}",
         f"Scenario: {scenario}",
         f"Records analyzed: {len(records)}",
-        f"Policy findings: {len(findings)}",
-        f"Heuristic risk points: {score}",
+        f"Grouped alerts: {len(findings)}",
+        f"Flagged events: {sum(f.get('occurrence_count', 1) for f in findings)}",
+        f"Heuristic risk score: {score} points",
         f"Risk band: {risk_band}",
-        "Score method: High=30, Medium=15, Low=5 per combined alert; uncapped sum.",
-        "Risk bands: High if any high-severity alert or total >= 60; Medium if total >= 20; otherwise Low.",
+        "Score method: High=30, Medium=15, Low=5 per grouped alert; uncapped cumulative total.",
+        "Risk bands: Highest alert severity; Low if no findings.",
         "Interpretation: triage aid only; not a probability, CVSS score, or proof of compromise.",
         "",
         "Ranked alerts",
@@ -53,15 +54,24 @@ def generate_report(records: list[dict[str, Any]], findings: list[dict[str, Any]
                 f"Session: {finding.get('session_id', 'unknown')} | Task: {finding.get('task_id', 'unknown')}",
                 f"Server: {finding.get('server', 'unknown')} | Tool: {finding.get('tool', 'unknown')}",
                 f"Target: {finding.get('target', 'unknown')}",
-                f"Reason: {finding.get('reason', 'No reason provided.')}",
+                f"Occurrences: {finding.get('occurrence_count', 1)}",
                 "",
             ])
+
+            for event in finding.get("events", [finding]):
+                lines.extend([
+                    f"  Sequence: {event.get('seq')} | Timestamp: {event.get('timestamp')}",
+                    f"  Execution status: {event.get('result_status') or 'unknown'}",
+                    f"  Severity: {event['severity']} | Policies: {event['policy_id']}",
+                    f"  Reason: {event['reason']}",
+                    "",
+                ])
 
     lines.extend([
         "Limitations",
         "- Observe-only analysis of recorded ADOP telemetry; no live blocking or enforcement.",
         "- Risk points and bands are project-defined heuristics for triage, not calibrated risk measurements.",
-        "- Each combined alert contributes once; separate ADOP records are counted separately.",
+        "- Each session/task/server/tool/recorded-target group contributes once at its highest severity. Incomplete identifiers remain separate.",
         "- Provenance flag checks event traceability, not data origin or whether PHI was disclosed.",
     ])
     return "\n".join(lines)

@@ -918,45 +918,48 @@ def evaluate_record(
     }]
 
 
+def group_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups = {}
+    for index, finding in enumerate(findings):
+        fields = tuple(finding.get(k) for k in ("session_id", "task_id", "server", "tool", "target"))
+        key = fields if all(isinstance(v, str) and v.strip() for v in fields) else (index,)
+        groups.setdefault(key, []).append(finding)
+
+    alerts = []
+    for events in groups.values():
+        strongest = max(events, key=lambda e: SEVERITY_RANK[e["severity"]])
+        alert = dict(strongest)
+        policies = {}
+        for event in events:
+            for match in event["policies"]:
+                pid = match["policy_id"]
+                if pid not in policies or SEVERITY_RANK[match["severity"]] > SEVERITY_RANK[policies[pid]["severity"]]:
+                    policies[pid] = match
+        alert.update(
+            events=events, occurrence_count=len(events),
+            policies=list(policies.values()),
+            policy_id=", ".join(policies),
+            policy_name=", ".join(m["policy_name"] for m in policies.values()),
+            reason=" ".join(dict.fromkeys(e["reason"] for e in events)),
+            provenance_flag="TRACEABLE" if all(e["provenance_flag"] == "TRACEABLE" for e in events) else "INCOMPLETE",
+        )
+        alerts.append(alert)
+    alerts.sort(key=lambda f: (-f["risk_points"], str(f.get("task_id")), str(f.get("target"))))
+    for rank, alert in enumerate(alerts, 1):
+        alert["rank"] = rank
+    return alerts
+
+
 def evaluate_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     findings = []
-
     for record in records:
         findings.extend(evaluate_record(record, records))
-
-    findings.sort(key=lambda finding: (
-        -finding["risk_points"],
-        -SEVERITY_RANK.get(finding["severity"], 0),
-        str(finding.get("task_id", "")),
-        str(finding.get("target", "")),
-    ))
-
-    for rank, finding in enumerate(findings, start=1):
-        finding["rank"] = rank
-
-    return findings
+    return group_findings(findings)
 
 
 def calculate_risk_score(findings: list[dict[str, Any]]) -> int:
-    # Return uncapped heuristic risk points,
-    # counting each combined alert once.
-    return sum(
-        int(finding.get("risk_points", 0))
-        for finding in findings
-    )
+    return sum(f["risk_points"] for f in findings)
 
 
 def classify_risk(findings: list[dict[str, Any]]) -> str:
-    # Existing v2 risk classification retained temporarily.
-    total = calculate_risk_score(findings)
-
-    if any(
-        finding.get("severity") == "high"
-        for finding in findings
-    ) or total >= 60:
-        return "High"
-
-    if total >= 20:
-        return "Medium"
-
-    return "Low"
+    return max((f["severity"] for f in findings), key=SEVERITY_RANK.get, default="low").capitalize()
