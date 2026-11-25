@@ -36,6 +36,7 @@ def _load_policy_config() -> dict[str, Any]:
     for field in (
         "approved_external_sources",
         "approved_memory_namespaces",
+        "restricted_source_directories",
     ):
         values = config.get(field)
 
@@ -100,6 +101,15 @@ def _load_resource_tags() -> dict[Path, dict[str, Any]]:
 
 
 RESOURCE_TAGS = _load_resource_tags()
+
+
+# Restricted source directories are defined by AgentWard policy.
+RESTRICTED_SOURCE_DIRECTORIES = []
+for directory in POLICY_CONFIG["restricted_source_directories"]:
+    resolved = (REPO_ROOT / directory).resolve()
+    if Path(directory).is_absolute() or not resolved.is_relative_to(REPO_ROOT.resolve()) or resolved == REPO_ROOT.resolve():
+        raise ValueError("Restricted source directory must be inside the repository.")
+    RESTRICTED_SOURCE_DIRECTORIES.append(resolved)
 
 
 SEVERITY_POINTS = {"high": 30, "medium": 15, "low": 5}
@@ -575,7 +585,88 @@ def _check_aw004(record: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
-def evaluate_record(record: dict[str, Any]) -> list[dict[str, Any]]:
+def _check_aw005(
+    record: dict[str, Any], session_records: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    # Compare memory writes with earlier successful resource reads.
+    if record.get("server") != "memory" or record.get("tool_name") != "memory_set":
+        return []
+
+    arguments = record.get("arguments")
+    if not isinstance(arguments, dict):
+        return []
+    value = arguments.get("value")
+    if not isinstance(value, str):
+        return []
+    value = " ".join(value.split())
+    session = record.get("session_id")
+    task = record.get("task_id")
+    seq = record.get("seq")
+    if not isinstance(session, str) or not session.strip():
+        return []
+    if not isinstance(task, str) or not task.strip() or type(seq) is not int:
+        return []
+
+    reasons = []
+    for source in session_records:
+        source_seq = source.get("seq")
+        if (source.get("session_id") != session or source.get("task_id") != task
+                or type(source_seq) is not int or source_seq >= seq
+                or source.get("result_status") != "success"):
+            continue
+        if (source.get("server"), source.get("tool_name")) not in (
+            ("filesystem", "read_text_file"), ("git", "git_show_worktree"),
+        ):
+            continue
+        source_args = source.get("arguments")
+        if not isinstance(source_args, dict):
+            continue
+        path = source_args.get("path")
+        summary = source.get("result_summary")
+        if not isinstance(path, str) or not path.strip() or not isinstance(summary, str):
+            continue
+        summary = " ".join(summary.split())
+        # Require a substantial exact prefix match after whitespace normalization.
+        if min(len(summary), len(value)) < 80:
+            continue
+        if not (value.startswith(summary) or summary.startswith(value)):
+            continue
+        try:
+            resolved = (REPO_ROOT / path).resolve()
+            if not resolved.is_relative_to(REPO_ROOT.resolve()):
+                classification = "outside the approved repository boundary"
+            elif resolved in RESOURCE_TAGS:
+                classification = "explicitly classified by the resource map"
+            elif any(resolved.is_relative_to(directory) for directory in RESTRICTED_SOURCE_DIRECTORIES):
+                classification = "within a policy-designated restricted source directory"
+            else:
+                continue
+        except (ValueError, OSError, RuntimeError):
+            continue
+        reasons.append(
+            f"Memory value matches recorded content from resource '{path}' "
+            f"(sequence {source_seq}, {classification}) in the same session and task."
+        )
+
+    if not reasons:
+        return []
+    status = record.get("result_status")
+    severity = "high" if status == "success" else "medium"
+    outcome = {
+        "success": "The memory write was recorded as successful.",
+        "error": "The memory write returned an error; successful persistence is not established.",
+        "blocked": "The memory write was recorded as blocked.",
+    }.get(status if isinstance(status, str) else "", "The memory write outcome is unknown.")
+    return [_policy_match(
+        "AW-005", "sensitive_data_persistence", severity,
+        " ".join(dict.fromkeys(reasons)) + " " + outcome
+        + " Content matching supports a potential data-flow relationship, not proof of complete lineage.",
+    )]
+
+
+def evaluate_record(
+    record: dict[str, Any], session_records: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     # Return one combined alert per ADOP record,
     # even if several policies match.
     matches = []
@@ -594,6 +685,9 @@ def evaluate_record(record: dict[str, Any]) -> list[dict[str, Any]]:
 
     # AW-004: Approved External Sources.
     matches.extend(_check_aw004(record))
+
+    # AW-005: Sensitive Data Persistence.
+    matches.extend(_check_aw005(record, session_records or []))
 
     # No policy matched this record.
     if not matches:
@@ -650,7 +744,7 @@ def evaluate_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     findings = []
 
     for record in records:
-        findings.extend(evaluate_record(record))
+        findings.extend(evaluate_record(record, records))
 
     findings.sort(key=lambda finding: (
         -finding["risk_points"],
