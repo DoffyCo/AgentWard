@@ -48,6 +48,13 @@ def _load_policy_config() -> dict[str, Any]:
                 f"Invalid or missing policy configuration: {field}"
             )
 
+    dependencies = config.get("approved_dependencies")
+    if not isinstance(dependencies, dict) or not all(
+        isinstance(name, str) and name.strip() and isinstance(version, str) and version.strip()
+        for name, version in dependencies.items()
+    ):
+        raise ValueError("Invalid approved dependency configuration.")
+
     return config
 
 
@@ -664,6 +671,100 @@ def _check_aw005(
     )]
 
 
+def _is_manifest_path(record: dict[str, Any]) -> bool:
+    arguments = record.get("arguments")
+    if not isinstance(arguments, dict):
+        return False
+    path = arguments.get("path")
+    if not isinstance(path, str) or not path.strip():
+        return False
+    try:
+        return (REPO_ROOT / path).resolve() == (REPO_ROOT / "package.json").resolve()
+    except (ValueError, OSError, RuntimeError):
+        return False
+
+
+def _dependency_issues(record: dict[str, Any]) -> tuple[list[str], bool]:
+    # Validate the complete recorded manifest, not the truncated read summary.
+    try:
+        manifest = json.loads(record["arguments"]["content"])
+        if not isinstance(manifest, dict):
+            raise ValueError("Expected an object")
+        issues = []
+        for section in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
+            entries = manifest.get(section, {})
+            if not isinstance(entries, dict):
+                raise ValueError("Invalid dependency section")
+            for name, version in entries.items():
+                if not name.strip() or not isinstance(version, str) or not version.strip():
+                    raise ValueError("Invalid dependency requirement")
+                approved = POLICY_CONFIG["approved_dependencies"].get(name)
+                if approved is None:
+                    issues.append(f"Unapproved dependency '{name}' in {section}.")
+                elif version != approved:
+                    issues.append(f"Unapproved version requirement for '{name}' in {section}.")
+        return issues, False
+    except (KeyError, TypeError, ValueError):
+        return ["Manifest content could not be validated."], True
+
+
+def _check_aw006(record: dict[str, Any], records: list[dict[str, Any]]) -> list[dict[str, str]]:
+    operation = (record.get("server"), record.get("tool_name"))
+    issues = []
+    uncertain = False
+    evidence = ""
+    if operation == ("filesystem", "write_file") and _is_manifest_path(record):
+        issues, uncertain = _dependency_issues(record)
+    elif operation in (("git", "git_add"), ("git", "git_commit")):
+        if operation[1] == "git_add" and not _is_manifest_path(record):
+            return []
+        session, task, seq = (record.get(k) for k in ("session_id", "task_id", "seq"))
+        if not isinstance(session, str) or not session.strip() or not isinstance(task, str) or not task.strip() or type(seq) is not int:
+            return []
+        # Track the latest successful manifest write and explicit staging event.
+        # Other tasks can invalidate evidence, but cannot establish same-task correlation.
+        pending = None
+        staged = None
+        prior = sorted((r for r in records if r.get("session_id") == session
+                        and type(r.get("seq")) is int and r["seq"] < seq), key=lambda r: r["seq"])
+        for event in prior:
+            if event.get("result_status") != "success":
+                continue
+            kind = (event.get("server"), event.get("tool_name"))
+            if kind == ("filesystem", "write_file") and _is_manifest_path(event):
+                pending = (*_dependency_issues(event), event["seq"], event.get("task_id"))
+            elif kind == ("git", "git_add"):
+                if _is_manifest_path(event):
+                    staged = (pending, event["seq"], event.get("task_id")) if pending else None
+                else:
+                    # A broad or ambiguous staging operation may change the index.
+                    args = event.get("arguments")
+                    path = args.get("path") if isinstance(args, dict) else None
+                    if not isinstance(path, str) or path.strip() in ("", ".", "./", "..") or any(c in path for c in "*?["):
+                        staged = None
+            elif kind == ("git", "git_commit") or kind == ("git", "git_init"):
+                staged = None
+                if kind[1] == "git_init":
+                    pending = None
+        if operation[1] == "git_add" and pending and pending[3] == task:
+            issues, uncertain, write_seq, _ = pending
+            evidence = f" Correlated with manifest write at sequence {write_seq}."
+        elif operation[1] == "git_commit" and staged and staged[2] == task and staged[0][3] == task:
+            issues, uncertain, write_seq, _ = staged[0]
+            evidence = (f" Correlated with manifest write at sequence {write_seq} and staging at sequence {staged[1]}."
+                        " The committed tree was not independently verified.")
+    if not issues:
+        return []
+    status = record.get("result_status")
+    severity = "high" if status == "success" and not uncertain else "medium"
+    outcome = (" The operation was recorded as successful." if status == "success" else
+               " The operation was recorded as blocked." if status == "blocked" else
+               " The operation returned an error; success is not established." if status == "error" else
+               " The operation outcome is unknown.")
+    return [_policy_match("AW-006", "dependency_integrity", severity,
+                          " ".join(issues) + evidence + outcome)]
+
+
 def evaluate_record(
     record: dict[str, Any], session_records: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
@@ -688,6 +789,9 @@ def evaluate_record(
 
     # AW-005: Sensitive Data Persistence.
     matches.extend(_check_aw005(record, session_records or []))
+
+    # AW-006: Dependency Integrity.
+    matches.extend(_check_aw006(record, session_records or []))
 
     # No policy matched this record.
     if not matches:

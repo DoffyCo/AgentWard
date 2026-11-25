@@ -47,6 +47,16 @@
             "name": "sensitive_data_persistence",
             "description": "Persistence of restricted resource content in memory requires stakeholder review.",
             "check": "content_correlation"
+        },
+        {
+            "id": "AW-006",
+            "name": "dependency_integrity",
+            "description": "Dependency manifest modifications and related staging and commit operations should be reviewed against approved dependency requirements.",
+            "check": "dependency_validation"
         }
-    ]
+    ],
+    "approved_dependencies": {
+        "fast-json-patch": "^3.1.1",
+        "fast-uuid": "^0.4.0"
+    }
 }
