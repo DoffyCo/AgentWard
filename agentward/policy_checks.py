@@ -365,7 +365,7 @@ def _check_aw003(record: dict[str, Any]) -> list[dict[str, str]]:
     ) or (server == "git" and tool in ("git_add", "git_show_worktree")):
         paths.append(arguments.get("path", target))
     elif server == "git" and tool == "git_diff":
-        # Inspect explicit pathspecs and output destinations.
+        # Inspect paths and output destinations.
         pathspec = arguments.get("pathspec", ".")
         if isinstance(pathspec, str):
             paths.extend(token for token in pathspec.split() if not token.startswith("-"))
@@ -592,7 +592,7 @@ def _is_manifest_path(record: dict[str, Any]) -> bool:
 
 
 def _dependency_issues(record: dict[str, Any]) -> tuple[list[str], bool]:
-    # Validate the complete recorded manifest, not the truncated read summary.
+    # Validate the complete manifest instead of the truncated read summary.
     try:
         manifest = json.loads(record["arguments"]["content"])
         if not isinstance(manifest, dict):
@@ -634,7 +634,6 @@ def _check_aw006(record: dict[str, Any], records: list[dict[str, Any]]) -> list[
         ):
             return []
         # Track the latest successful manifest write and explicit staging event.
-        # Other tasks can invalidate evidence, but cannot establish same-task correlation.
         pending = None
         staged = None
         prior_events = sorted((event_record for event_record in records if event_record.get("session_id") == session
@@ -649,7 +648,7 @@ def _check_aw006(record: dict[str, Any], records: list[dict[str, Any]]) -> list[
                 if _is_manifest_path(event):
                     staged = (pending, event["seq"], event.get("task_id")) if pending else None
                 else:
-                    # A broad or ambiguous staging operation may change the index.
+
                     event_arguments = event.get("arguments")
                     path = event_arguments.get("path") if isinstance(event_arguments, dict) else None
                     if not isinstance(path, str) or path.strip() in ("", ".", "./", "..") or any(character in path for character in "*?["):
@@ -710,7 +709,7 @@ def _check_aw007(record: dict[str, Any], records: list[dict[str, Any]]) -> list[
     prior_events = sorted((event_record for event_record in records if event_record.get("session_id") == session
                     and event_record.get("task_id") == task and type(event_record.get("seq")) is int
                     and event_record["seq"] < sequence), key=lambda event_record: event_record["seq"])
-    # Ambiguous sequence numbers cannot establish reliable ordering.
+
     if len({event_record["seq"] for event_record in prior_events}) != len(prior_events) or sum(
         event_record.get("session_id") == session and event_record.get("task_id") == task and event_record.get("seq") == sequence
         for event_record in records

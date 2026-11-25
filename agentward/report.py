@@ -85,7 +85,7 @@ def generate_report(records: list[dict[str, Any]], findings: list[dict[str, Any]
                             f"    Earlier successful fetch: sequence {source['seq']} | "
                             f"Timestamp: {format_timestamp(source['timestamp'])} | URL: {source['url']}"
                         )
-                    lines.append("  Temporal ordering alone does not establish causation.")
+                    lines.append("  Temporal ordering alone does not establish causation.")    
                 else:
                     lines.append("  No qualifying prior source relationship identified.")
                 lines.append("")
@@ -147,7 +147,7 @@ def generate_audit_report(
         ])
     if not findings:
         lines.append("No alerts require disposition.")
-    lines.append("Checksums support integrity comparison, not authentication or tamper-proof storage.")
+    lines.append("Checksums help verify report integrity but do not provide authentication or prevent tampering.")
     return "\n".join(lines)
 
 

@@ -6,7 +6,6 @@ from typing import Any
 
 # ADOP directory configuration.
 # Defaults to an ADOP directory located alongside AgentWard.
-# Can be overridden using the ADOP_ROOT environment variable.
 ADOP_ROOT = Path(
     os.environ.get(
         "ADOP_ROOT",
