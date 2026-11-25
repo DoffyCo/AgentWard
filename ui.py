@@ -1,3 +1,4 @@
+
 import tempfile
 from pathlib import Path
 from datetime import datetime
@@ -49,7 +50,8 @@ try:
     risk_band = classify_risk(findings)
 
 except Exception as exc:
-    st.error(f"Could not analyze this file: {exc}")
+    st.error("Could not analyze this file.")
+    st.text(str(exc))
     st.stop()
 
 finally:
@@ -77,10 +79,13 @@ metric1, metric2, metric3, metric4 = st.columns(4)
 metric1.metric("Risk band", risk_band)
 metric2.metric("Heuristic risk score", f"{score} points")
 metric3.metric("Grouped alerts", len(findings))
-st.caption(f"Flagged events: {sum(f.get('occurrence_count', 1) for f in findings)}. Score is an uncapped cumulative total; risk band follows highest severity.")
+st.caption(
+    f"Flagged events: {sum(f.get('occurrence_count', 1) for f in findings)}. "
+    "Score is an uncapped cumulative total; risk band follows highest severity."
+)
 metric4.metric("Records analyzed", len(records))
 
-st.caption(f"ADOP session: {session_id} · Scenario: {scenario}")
+st.text(f"ADOP session: {session_id} · Scenario: {scenario}")
 decisions = {}
 
 st.subheader("Ranked alerts")
@@ -99,13 +104,20 @@ else:
             left, right = st.columns([2, 1])
 
             with left:
-                st.write(f"**Task:** {finding.get('task_id') or 'unknown'}")
-                st.write(f"**Target:** {finding.get('target') or 'unknown'}")
-                st.write(f"**Server / tool:** {finding.get('server') or 'unknown'} / "
-                         f"{finding.get('tool') or 'unknown'}")
+                # Render untrusted ADOP data as plain text.
+                st.text(f"Task: {finding.get('task_id') or 'unknown'}")
+                st.text(f"Target: {finding.get('target') or 'unknown'}")
+                st.text(
+                    f"Server / tool: {finding.get('server') or 'unknown'} / "
+                    f"{finding.get('tool') or 'unknown'}"
+                )
                 st.text(f"Occurrences: {finding.get('occurrence_count', 1)}")
+
                 for event in finding.get("events", [finding]):
-                    st.text(f"Sequence: {event.get('seq')} | Timestamp: {format_timestamp(event.get('timestamp'))}")
+                    st.text(
+                        f"Sequence: {event.get('seq')} | "
+                        f"Timestamp: {format_timestamp(event.get('timestamp'))}"
+                    )
                     st.text(f"Execution status: {event.get('result_status') or 'unknown'}")
                     st.text(f"Severity: {event['severity']} | Policies: {event['policy_id']}")
                     st.text(event["reason"])
@@ -117,9 +129,13 @@ else:
                         for source in sources:
                             st.text(
                                 f"Earlier successful fetch: sequence {source['seq']} | "
-                                f"Timestamp: {format_timestamp(source['timestamp'])} | URL: {source['url']}"
+                                f"Timestamp: {format_timestamp(source['timestamp'])} | "
+                                f"URL: {source['url']}"
                             )
-                        st.caption("Same session and task; temporal ordering alone does not establish causation.")
+                        st.caption(
+                            "Same session and task; temporal ordering alone "
+                            "does not establish causation."
+                        )
                     else:
                         st.caption("No qualifying prior source relationship identified.")
 
@@ -130,7 +146,10 @@ else:
                     "TRACEABLE means the alert links to the listed ADOP event fields. "
                     "It does not prove maliciousness or confirm that PHI was disclosed."
                 )
-                st.text(f"Events with potential source relationships: {finding.get('correlated_event_count', 0)}")
+                st.text(
+                    f"Events with potential source relationships: "
+                    f"{finding.get('correlated_event_count', 0)}"
+                )
                 st.write(f"**Alert points:** +{finding.get('risk_points', 0)}")
 
             decision_key = f"decision_{finding.get('rank')}"
@@ -148,7 +167,10 @@ else:
                 placeholder="Briefly explain the decision",
             )
 
-            decisions[finding["rank"]] = {"disposition": disposition, "rationale": rationale}
+            decisions[finding["rank"]] = {
+                "disposition": disposition,
+                "rationale": rationale,
+            }
 
 st.subheader("Save assessment")
 reviewer = st.text_input("Reviewer name or identifier", key="reviewer")
@@ -156,7 +178,9 @@ st.caption("Input SHA-256: " + input_identity[1])
 
 if st.button("Save report to the reports folder"):
     try:
-        report_text = generate_audit_report(records, findings, input_bytes, uploaded_file.name, reviewer, decisions)
+        report_text = generate_audit_report(
+            records, findings, input_bytes, uploaded_file.name, reviewer, decisions
+        )
         reports_dir = Path(__file__).resolve().parent / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%m-%d-%Y_%H-%M-%S")
@@ -164,23 +188,43 @@ if st.button("Save report to the reports folder"):
         base_name = f"{input_name}-{scenario}-assessment-{timestamp}"
         output_path = reports_dir / f"{base_name}.txt"
         counter = 1
+
         # Avoid overwriting either an assessment or its checksum.
         while output_path.exists() or output_path.with_suffix(".txt.sha256").exists():
             output_path = reports_dir / f"{base_name}-{counter}.txt"
             counter += 1
+
         report_bytes, checksum_bytes = save_audit_report(report_text, output_path)
-        st.session_state["saved_audit"] = (str(output_path), report_bytes, checksum_bytes)
+        st.session_state["saved_audit"] = (
+            str(output_path), report_bytes, checksum_bytes
+        )
+
     except (ValueError, OSError) as exc:
-        st.error(str(exc))
+        st.error("Could not save the assessment.")
+        st.text(str(exc))
 
 # Keep the last saved snapshot available across dashboard reruns.
 saved_audit = st.session_state.get("saved_audit")
 if saved_audit:
     saved_path, report_bytes, checksum_bytes = saved_audit
-    st.success(f"Last saved report: {saved_path}")
-    st.caption("Downloads contain the last saved snapshot. Save again to include any changes.")
-    st.download_button("Download saved report", data=report_bytes, file_name=Path(saved_path).name, mime="text/plain")
-    st.download_button("Download report checksum", data=checksum_bytes, file_name=Path(saved_path).name + ".sha256", mime="text/plain")
+    st.success("Assessment saved successfully.")
+    st.text(f"Last saved report: {saved_path}")
+    st.caption(
+        "Downloads contain the last saved snapshot. "
+        "Save again to include any changes."
+    )
+    st.download_button(
+        "Download saved report",
+        data=report_bytes,
+        file_name=Path(saved_path).name,
+        mime="text/plain",
+    )
+    st.download_button(
+        "Download report checksum",
+        data=checksum_bytes,
+        file_name=Path(saved_path).name + ".sha256",
+        mime="text/plain",
+    )
 
 st.divider()
 st.caption(

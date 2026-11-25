@@ -1,0 +1,3 @@
+# Restrict dashboard access to the local machine.
+[server]
+address = "127.0.0.1"
