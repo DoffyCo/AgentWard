@@ -9,8 +9,14 @@ def event(seq, args=None, status="success", task="task", session="session"):
 
 
 def matches(records):
-    return {f["seq"]: m["severity"] for f in evaluate_records(records)
-            for m in f["policies"] if m["policy_id"] == "AW-007"}
+    # Inspect individual events within each grouped alert.
+    return {
+        event["seq"]: match["severity"]
+        for finding in evaluate_records(records)
+        for event in finding.get("events", [finding])
+        for match in event["policies"]
+        if match["policy_id"] == "AW-007"
+    }
 
 
 class TestAW007(unittest.TestCase):
