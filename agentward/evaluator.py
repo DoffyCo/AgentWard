@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,50 @@ ADOP_ROOT = Path(
 ).resolve()
 
 REPO_ROOT = ADOP_ROOT / "testbed-repo"
+
+
+# Policy configuration.
+POLICY_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "policies"
+    / "healthcare_policies.json"
+)
+
+
+def _load_policy_config() -> dict[str, Any]:
+    # Load and validate the policy configuration.
+    with POLICY_PATH.open("r", encoding="utf-8") as file:
+        config = json.load(file)
+
+    if not isinstance(config, dict):
+        raise ValueError("Policy configuration must be a JSON object.")
+
+    for field in (
+        "approved_external_sources",
+        "approved_memory_namespaces",
+    ):
+        values = config.get(field)
+
+        if not isinstance(values, list) or not all(
+            isinstance(value, str) and bool(value.strip())
+            for value in values
+        ):
+            raise ValueError(
+                f"Invalid or missing policy configuration: {field}"
+            )
+
+    return config
+
+
+POLICY_CONFIG = _load_policy_config()
+
+APPROVED_EXTERNAL_SOURCES = set(
+    POLICY_CONFIG["approved_external_sources"]
+)
+
+APPROVED_MEMORY_NAMESPACES = set(
+    POLICY_CONFIG["approved_memory_namespaces"]
+)
 
 
 SEVERITY_POINTS = {"high": 30, "medium": 15, "low": 5}
@@ -190,6 +235,230 @@ def _check_aw001(record: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
+def _get_git_output_paths(
+    arguments: dict[str, Any],
+) -> list[str]:
+    # Identify output destinations supplied to git_diff.
+    paths = []
+    tokens = []
+
+    ref = arguments.get("ref", "HEAD")
+    pathspec = arguments.get("pathspec", ".")
+
+    if isinstance(ref, str):
+        tokens.append(ref)
+
+    if isinstance(pathspec, str):
+        tokens.extend(pathspec.split())
+
+    index = 0
+
+    while index < len(tokens):
+        token = tokens[index]
+
+        # Arguments after the separator are treated as pathspecs.
+        if token == "--":
+            break
+
+        if token.startswith("--output="):
+            paths.append(token.split("=", 1)[1])
+
+        elif token == "--output":
+            if (
+                index + 1 < len(tokens)
+                and not tokens[index + 1].startswith("-")
+            ):
+                paths.append(tokens[index + 1])
+                index += 1
+            else:
+                paths.append("")
+
+        index += 1
+
+    return list(dict.fromkeys(paths))
+
+
+def _check_aw002(record: dict[str, Any]) -> list[dict[str, str]]:
+    # Evaluate data movement and persistence destinations.
+    server = record.get("server", "")
+    tool = record.get("tool_name", "")
+    target = record.get("target_resource", "")
+    arguments = record.get("arguments", {})
+    status = record.get("result_status", "")
+
+    if not isinstance(arguments, dict):
+        arguments = {}
+
+    violations = []
+    unresolved = []
+    destinations = []
+
+    # Inspect filesystem write destinations.
+    if server == "filesystem" and tool == "write_file":
+        destinations.append(arguments.get("path", target))
+
+    # Inspect Git diff output destinations.
+    elif server == "git" and tool == "git_diff":
+        destinations.extend(_get_git_output_paths(arguments))
+
+    # Inspect persistent memory destinations.
+    elif server == "memory" and tool == "memory_set":
+        namespace = arguments.get("namespace")
+        key = arguments.get("key")
+
+        if not isinstance(namespace, str) or not namespace.strip():
+            unresolved.append(
+                "The memory destination namespace could not be established."
+            )
+
+        elif namespace not in APPROVED_MEMORY_NAMESPACES:
+            violations.append(
+                f"Memory namespace '{namespace}' is not an approved "
+                "data persistence destination."
+            )
+
+        if not isinstance(key, str) or not key.strip():
+            unresolved.append(
+                "The memory destination key could not be established."
+            )
+
+    # Check identified filesystem destinations.
+    for destination in destinations:
+        if (
+            not isinstance(destination, str)
+            or not destination.strip()
+        ):
+            unresolved.append(
+                "The data output destination could not be established."
+            )
+            continue
+
+        try:
+            if _is_outside_sandbox(destination, REPO_ROOT):
+                violations.append(
+                    f"Data output destination '{destination}' resolves "
+                    "outside the approved repository boundary."
+                )
+
+        except (ValueError, OSError, RuntimeError):
+            unresolved.append(
+                f"Data output destination '{destination}' "
+                "could not be safely resolved."
+            )
+
+    if not violations and not unresolved:
+        return []
+
+    # Distinguish successful operations from unsuccessful attempts.
+    if status == "success" and violations:
+        severity = "high"
+        outcome = (
+            "The tool call was recorded as successful. "
+            "Review the potential unauthorized data movement."
+        )
+
+    elif status == "success":
+        severity = "medium"
+        outcome = (
+            "The tool call was recorded as successful, but destination "
+            "authorization could not be established."
+        )
+
+    elif status == "error":
+        severity = "medium"
+        outcome = (
+            "The tool call returned an error. "
+            "Successful unauthorized data movement is not established."
+        )
+
+    elif status == "blocked":
+        severity = "medium"
+        outcome = (
+            "The tool call was recorded as blocked."
+        )
+
+    else:
+        severity = "medium"
+        outcome = (
+            "The outcome of the tool call could not be established."
+        )
+
+    reasons = list(dict.fromkeys(violations + unresolved))
+
+    return [
+        _policy_match(
+            "AW-002",
+            "approved_data_destinations",
+            severity,
+            " ".join(reasons) + " " + outcome,
+        )
+    ]
+
+
+def _check_aw004(record: dict[str, Any]) -> list[dict[str, str]]:
+    # Evaluate the trust of external information sources.
+    server = record.get("server", "")
+    tool = record.get("tool_name", "")
+    arguments = record.get("arguments", {})
+    status = record.get("result_status", "")
+
+    if server != "fetch" or tool != "fetch":
+        return []
+
+    if not isinstance(arguments, dict):
+        arguments = {}
+
+    url = arguments.get("url")
+
+    # Compare the requested URL against the approved-source list.
+    if not isinstance(url, str) or not url.strip():
+        reason = (
+            "The requested external source URL could not be established."
+        )
+
+    elif url in APPROVED_EXTERNAL_SOURCES:
+        return []
+
+    else:
+        reason = (
+            f"External source '{url}' is not listed "
+            "in the approved-source policy."
+        )
+
+    # Distinguish retrieval from attempted retrieval.
+    if status == "success":
+        outcome = (
+            "The fetch was recorded as successful. "
+            "Review the source for potential untrusted content."
+        )
+
+    elif status == "error":
+        outcome = (
+            "The fetch returned an error. "
+            "Successful retrieval is not established."
+        )
+
+    elif status == "blocked":
+        outcome = (
+            "The fetch was recorded as blocked."
+        )
+
+    else:
+        outcome = (
+            "The outcome of the fetch could not be established."
+        )
+
+    return [
+        _policy_match(
+            "AW-004",
+            "approved_external_sources",
+            "medium",
+            reason + " " + outcome
+            + " This finding does not establish outbound data exfiltration.",
+        )
+    ]
+
+
 def evaluate_record(record: dict[str, Any]) -> list[dict[str, Any]]:
     # Return one combined alert per ADOP record,
     # even if several policies match.
@@ -202,19 +471,7 @@ def evaluate_record(record: dict[str, Any]) -> list[dict[str, Any]]:
     matches.extend(_check_aw001(record))
 
     # AW-002: Approved Data Destinations.
-    # Existing v2 logic retained temporarily.
-    if (
-        server == "fetch"
-        and isinstance(target, str)
-        and target.startswith(("http://", "https://"))
-    ):
-        matches.append(_policy_match(
-            "AW-002",
-            "approved_data_destinations",
-            "medium",
-            "The agent accessed an external destination that "
-            "requires destination-policy review.",
-        ))
+    matches.extend(_check_aw002(record))
 
     # AW-003: Sensitive Resource Access.
     # Existing v2 logic retained temporarily.
@@ -229,6 +486,9 @@ def evaluate_record(record: dict[str, Any]) -> list[dict[str, Any]]:
             "The resource name suggests potentially sensitive "
             "information and requires authorization review.",
         ))
+
+    # AW-004: Approved External Sources.
+    matches.extend(_check_aw004(record))
 
     # No policy matched this record.
     if not matches:

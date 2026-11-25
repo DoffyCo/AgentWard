@@ -1,11 +1,18 @@
 {
     "agent_role": "healthcare_claims_agent",
-    "description": "Initial policies for an autonomous healthcare insurance claims agent.",
+    "description": "Security policies for an autonomous healthcare insurance claims agent.",
     "allowed_servers": [
         "filesystem",
         "git",
         "memory",
         "fetch"
+    ],
+    "approved_external_sources": [
+        "https://intranet.example/vendor-readme"
+    ],
+    "approved_memory_namespaces": [
+        "triage",
+        "reviews"
     ],
     "policies": [
         {
@@ -17,7 +24,7 @@
         {
             "id": "AW-002",
             "name": "approved_data_destinations",
-            "description": "The agent should not access or transfer data to unapproved external destinations.",
+            "description": "The agent should not write, transfer, or persist data to unapproved destinations.",
             "check": "destination"
         },
         {
@@ -25,6 +32,12 @@
             "name": "sensitive_resource_access",
             "description": "Access to sensitive resources should be reviewed against the agent's authorized purpose.",
             "check": "sensitive_resource"
+        },
+        {
+            "id": "AW-004",
+            "name": "approved_external_sources",
+            "description": "The agent should retrieve external information only from approved sources.",
+            "check": "source_trust"
         }
     ]
 }
